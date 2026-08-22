@@ -39,7 +39,6 @@
         <div id="controls">
             <div class="control-row">
                 <input type="file" id="csvFile" accept=".csv" />
-                <span style="color: #666; font-size: 12px;">※CSV読み込み項目順: 番号,部隊名,親部隊名,配置区分,役職,所属区分,軍種,階級,氏名,性別,備考</span>
                 <button class="btn-export" onclick="exportToSVG()">SVG保存</button>
             </div>
             <div class="control-row">
@@ -253,10 +252,10 @@
                         new go.Binding("visible", "role", r => r !== "assistant")
                     ),
                     $(go.TextBlock, { font: "10px sans-serif", stroke: "#555", margin: new go.Margin(0, 0, 6, 0) },
-                        new go.Binding("text", "", d => `${d.aggTotal}名 (兼務除く:${d.aggUniqueCount}名) \n 幹部:${d.aggTotalKanbu}(${d.aggUniqueKanbu}) 准曹士:${d.aggTotalIppan}(${d.aggUniqueIppan}) 事務技官:${d.aggTotalJimu}(${d.aggUniqueJimu})`),
+                        new go.Binding("text", "", d => `${d.aggTotal}名 (兼務除く:${d.aggUniqueCount}名) \n 幹:${d.aggTotalKanbu}(${d.aggUniqueKanbu}) 曹:${d.aggTotalIppan}(${d.aggUniqueIppan}) 事:${d.aggTotalJimu}(${d.aggUniqueJimu})`),
                         new go.Binding("visible", "role", r => r !== "assistant")
                     ),
-                    $(go.TextBlock, { font: "10px monospace", stroke: "#bbb", margin: new go.Margin(0, 0, 2, 0) }, "----------------------------------",
+                    $(go.TextBlock, { font: "10px monospace", stroke: "#bbb", margin: new go.Margin(0, 0, 2, 0) }, "--------------------",
                         new go.Binding("visible", "role", r => r !== "assistant")
                     ),
                     $(go.TextBlock, { font: "11px sans-serif", stroke: "#333", margin: new go.Margin(0, 0, 0, 0) },
@@ -320,12 +319,16 @@
 
                         const kanbuList = ["将", "将補", "1佐", "2佐", "3佐", "1尉", "2尉", "3尉"];
                         const ippanList = ["准尉", "1曹", "2曹", "3曹", "士長", "1士", "2士", "3士"];
-                        const jimuList = ["事務官", "技官"];
 
                         let category = "other";
-                        if (kanbuList.some(k => rank.includes(k))) category = "kanbu";
-                        else if (ippanList.some(i => rank.includes(i))) category = "ippan";
-                        else if (jimuList.some(j => rank.includes(j))) category = "jimu";
+                        if (kanbuList.some(k => rank.includes(k))) {
+                            category = "kanbu";
+                        } else if (rank.startsWith('事') || rank.startsWith('技')) {
+                            // 階級が「事」または「技」で始まる場合は事務官等として判定
+                            category = "jimu";
+                        } else if (ippanList.some(i => rank.includes(i))) {
+                            category = "ippan";
+                        }
 
                         orgMap[nodeKey].members.push({
                             id: memberId,
@@ -496,17 +499,17 @@
             document.getElementById('sidebar-summary').innerHTML = 
                 `<div style="padding: 8px; background: #f1f3f5; border-radius: 4px; margin-bottom: 10px;">` +
                 `<b>【部隊集計（配下含む・兼務除外反映）】</b><br>` +
-                `総人数 —— 延べ: ${nodeData.aggTotal}名 / 実人数: ${nodeData.aggUniqueCount}名<br>` +
-                `階級区分 —— 幹部 延べ:${nodeData.aggTotalKanbu}(実:${nodeData.aggUniqueKanbu}) / 准曹士 延べ:${nodeData.aggTotalIppan}(実:${nodeData.aggUniqueIppan}) / 事務技官 延べ:${nodeData.aggTotalJimu}(実:${nodeData.aggUniqueJimu})<br>` +
-                `軍種別 —— 陸: 延べ${nodeData.aggTotalBranch.陸}(実:${nodeData.aggUniqueBranch.陸}) / 海: 延べ${nodeData.aggTotalBranch.海}(実:${nodeData.aggUniqueBranch.海}) / 空: 延べ${nodeData.aggTotalBranch.空}(実:${nodeData.aggUniqueBranch.空})<br>` +
-                `男女別 —— 男性: 延べ${nodeData.aggTotalMale}(実:${nodeData.aggUniqueMale}) / 女性: 延べ${nodeData.aggTotalFemale}(実:${nodeData.aggUniqueFemale})` +
+                `総人数 ——  ${nodeData.aggTotal}名 / 実人数: ${nodeData.aggUniqueCount}名<br>` +
+                `階級区分 —— 幹部 ${nodeData.aggTotalKanbu}(実:${nodeData.aggUniqueKanbu}) / 准曹士 ${nodeData.aggTotalIppan}(実:${nodeData.aggUniqueIppan}) / 事務官等 ${nodeData.aggTotalJimu}(実:${nodeData.aggUniqueJimu})<br>` +
+                `軍種別 —— 陸: ${nodeData.aggTotalBranch.陸}(実:${nodeData.aggUniqueBranch.陸}) / 海: ${nodeData.aggTotalBranch.海}(実:${nodeData.aggUniqueBranch.海}) / 空: ${nodeData.aggTotalBranch.空}(実:${nodeData.aggUniqueBranch.空})<br>` +
+                `男女別 —— 男性: ${nodeData.aggTotalMale}(実:${nodeData.aggUniqueMale}) / 女性: ${nodeData.aggTotalFemale}(実:${nodeData.aggUniqueFemale})` +
                 `</div>` +
                 `<div style="padding: 8px; background: #f1f3f5; border-radius: 4px; margin-bottom: 10px;">` +
                 `<b>【${nodeData.org} 単体】</b><br>` +
-                `総人数 —— 延べ: ${nodeData.total}名 / 実人数: ${nodeData.uniqueMembersMap.size}名<br>` +
-                `階級区分 —— 幹部 延べ:${nodeData.kanbu}(実:${nodeData.uniqueKanbu}) / 准曹士 延べ:${nodeData.ippan}(実:${nodeData.uniqueIppan}) / 事務技官 延べ:${nodeData.jimu}(実:${nodeData.uniqueJimu})<br>` +
-                `軍種別 —— 陸: 延べ${nodeData.branchCount.陸}(実:${nodeData.uniqueBranchCount.陸}) / 海: 延べ${nodeData.branchCount.海}(実:${nodeData.uniqueBranchCount.海}) / 空: 延べ${nodeData.branchCount.空}(実:${nodeData.uniqueBranchCount.空})<br>` +
-                `男女別 —— 男性: 延べ${nodeData.male}(実:${nodeData.uniqueMale}) / 女性: 延べ${nodeData.female}(実:${nodeData.uniqueFemale})` +
+                `総人数 ——  ${nodeData.total}名 / 実人数: ${nodeData.uniqueMembersMap.size}名<br>` +
+                `階級区分 —— 幹部 ${nodeData.kanbu}(実:${nodeData.uniqueKanbu}) / 准曹士 ${nodeData.ippan}(実:${nodeData.uniqueIppan}) / 事務官等 ${nodeData.jimu}(実:${nodeData.uniqueJimu})<br>` +
+                `軍種別 —— 陸: ${nodeData.branchCount.陸}(実:${nodeData.uniqueBranchCount.陸}) / 海: ${nodeData.branchCount.海}(実:${nodeData.uniqueBranchCount.海}) / 空: ${nodeData.branchCount.空}(実:${nodeData.uniqueBranchCount.空})<br>` +
+                `男女別 —— 男性: ${nodeData.male}(実:${nodeData.uniqueMale}) / 女性: ${nodeData.female}(実:${nodeData.uniqueFemale})` +
                 `</div>`;
 
             const tbody = document.getElementById('sidebar-member-tbody');
