@@ -1,0 +1,246 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <title>組織図サンプル（アシスタント左右配置・修正版）</title>
+    <script src="https://unpkg.com/gojs/release/go.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.3.2/papaparse.min.js"></script>
+    <style>
+        body { font-family: sans-serif; margin: 0; display: flex; height: 100vh; overflow: hidden; }
+        #main-container { flex-grow: 1; display: flex; flex-direction: column; height: 100%; }
+        #controls { padding: 10px; background: #f1f3f5; border-bottom: 1px solid #ccc; }
+        #myDiagramDiv { flex-grow: 1; background: #fdfdfd; }
+        
+        #sidebar {
+            width: 380px; background: #fff; border-left: 1px solid #ccc;
+            box-shadow: -2px 0 5px rgba(0,0,0,0.1); display: flex; flex-direction: column;
+            transform: translateX(100%); transition: transform 0.3s ease;
+            position: absolute; right: 0; top: 0; height: 100%; z-index: 10;
+        }
+        #sidebar.open { transform: translateX(0); }
+        #sidebar-header { padding: 15px; background: #007acc; color: white; display: flex; justify-content: space-between; align-items: center; }
+        #sidebar-content { padding: 15px; overflow-y: auto; flex-grow: 1; }
+        table.member-table { width: 100%; border-collapse: collapse; margin-top: 10px; font-size: 12px; }
+        table.member-table th, table.member-table td { border: 1px solid #ddd; padding: 6px; text-align: left; }
+        table.member-table th { background: #f8f9fa; }
+        .close-btn { background: none; border: none; color: white; font-size: 18px; cursor: pointer; }
+    </style>
+</head>
+<body>
+
+    <div id="main-container">
+        <div id="controls">
+            <input type="file" id="csvFile" accept=".csv" />
+            <span style="font-size: 12px; color: #666; margin-left: 10px;">※CSVを読み込むと、アシスタントが左右に配置されます。</span>
+        </div>
+        <div id="myDiagramDiv"></div>
+    </div>
+
+    <div id="sidebar">
+        <div id="sidebar-header">
+            <h3 id="sidebar-org-title" style="margin:0; font-size: 16px;">組織詳細</h3>
+            <button class="close-btn" onclick="closeSidebar()">×</button>
+        </div>
+        <div id="sidebar-content">
+            <div id="sidebar-summary" style="margin-bottom: 15px; font-size: 13px; line-height: 1.5; background: #f8f9fa; padding: 10px; border-radius: 4px;"></div>
+            <h4 style="margin: 0 0 5px 0; font-size: 14px;">所属メンバー一覧</h4>
+            <table class="member-table">
+                <thead>
+                    <tr><th>番号</th><th>役職</th><th>氏名</th><th>性別</th><th>血液型</th></tr>
+                </thead>
+                <tbody id="sidebar-member-tbody"></tbody>
+            </table>
+        </div>
+    </div>
+
+    <script>
+        const $ = go.GraphObject.make;
+        let myDiagram;
+
+        // 【カスタムレイアウト】アシスタントを左右に振り分け、線を再計算するクラス
+        class SideTreeLayout extends go.TreeLayout {
+            constructor() {
+                super();
+            }
+
+            commitNodes() {
+                super.commitNodes();
+                if (this.network === null) return;
+
+                let rootVertex = null;
+                this.network.vertexes.each(v => {
+                    if (v.node !== null && v.node.data && v.node.data.role === "root") {
+                        rootVertex = v;
+                    }
+                });
+
+                if (!rootVertex) return;
+
+                let rootX = rootVertex.centerX;
+                let rootY = rootVertex.centerY;
+                let leftX = rootX - 220; // 左側へのオフセット
+                let rightX = rootX + 220; // 右側へのオフセット
+                let leftCount = 0;
+                let rightCount = 0;
+
+                rootVertex.destinationVertexes.each(v => {
+                    if (v.node !== null && v.node.data && v.node.data.role === "assistant") {
+                        if (leftCount <= rightCount) {
+                            v.centerX = leftX;
+                            v.centerY = rootY + (leftCount * 80);
+                            leftCount++;
+                        } else {
+                            v.centerX = rightX;
+                            v.centerY = rootY + (rightCount * 80);
+                            rightCount++;
+                        }
+                        // ノードの実際の位置を強制更新
+                        v.node.position = new go.Point(
+                            v.centerX - v.node.actualBounds.width / 2, 
+                            v.centerY - v.node.actualBounds.height / 2
+                        );
+                    }
+                });
+            }
+
+            commitLinks() {
+                super.commitLinks();
+                // 移動したアシスタントへの線を再描画
+                this.diagram.links.each(link => {
+                    if (link.toNode && link.toNode.data && link.toNode.data.role === "assistant") {
+                        link.invalidateRoute();
+                    }
+                });
+            }
+        }
+
+        function init() {
+            myDiagram = $(go.Diagram, "myDiagramDiv", {
+                layout: $(SideTreeLayout, {
+                    angle: 90,
+                    layerSpacing: 60,
+                    nodeSpacing: 40
+                }),
+                "undoManager.isEnabled": true
+            });
+
+            // ノードテンプレート
+            myDiagram.nodeTemplate = $(go.Node, "Auto",
+                {
+                    movable: true,
+                    click: (e, node) => showSidebar(node.data)
+                },
+                $(go.Shape, "RoundedRectangle", { fill: "white", stroke: "#007acc", strokeWidth: 2, parameter1: 6 }),
+                $(go.Panel, "Vertical", { margin: 10, alignment: go.Spot.Left },
+                    $(go.TextBlock, { font: "bold 14px sans-serif", stroke: "#333", margin: new go.Margin(0, 0, 4, 0) },
+                        new go.Binding("text", "org")
+                    ),
+                    $(go.TextBlock, { font: "10px sans-serif", stroke: "#666", margin: new go.Margin(0, 0, 6, 0) },
+                        new go.Binding("text", "", d => `計:${d.total}名 | 男:${d.male} 女:${d.female} | A:${d.blood.A} B:${d.blood.B} O:${d.blood.O} AB:${d.blood.AB}`)
+                    ),
+                    $(go.Shape, "LineH", { stroke: "#ddd", strokeWidth: 1, width: 220, margin: new go.Margin(0, 0, 6, 0) }),
+                    $(go.TextBlock, { font: "12px sans-serif", stroke: "#444" },
+                        new go.Binding("text", "membersSummary")
+                    )
+                )
+            );
+
+            // リンク（線）テンプレート
+            myDiagram.linkTemplate = $(go.Link,
+                { routing: go.Link.Orthogonal, corner: 5 },
+                $(go.Shape, { strokeWidth: 1.5, stroke: "#007acc" })
+            );
+        }
+
+        // CSV読み込み＆データ構築
+        document.getElementById('csvFile').addEventListener('change', function(e) {
+            const file = e.target.files[0];
+            if (!file) return;
+
+            Papa.parse(file, {
+                header: true,
+                skipEmptyLines: true,
+                complete: function(results) {
+                    const data = results.data;
+                    const orgMap = {};
+
+                    data.forEach(row => {
+                        if (!row.組織名) return;
+
+                        const isAssistant = row.role === "assistant";
+                        // アシスタント職は個人単位でノード化するため番号をキーにする
+                        const nodeKey = isAssistant ? `${row.組織名}_${row.番号}` : row.組織名;
+                        const parentKey = row.親組織名 === "なし" || !row.親組織名 ? "" : row.親組織名;
+
+                        if (!orgMap[nodeKey]) {
+                            orgMap[nodeKey] = {
+                                key: nodeKey,
+                                parent: parentKey,
+                                org: isAssistant ? `${row.役職}: ${row.氏名}` : row.組織名,
+                                role: row.role ? row.role.trim() : "normal", // 余白除去＆デフォルト設定
+                                total: 0, male: 0, female: 0,
+                                blood: { A: 0, B: 0, O: 0, AB: 0, その他: 0 },
+                                members: []
+                            };
+                        }
+
+                        const target = orgMap[nodeKey];
+                        target.total++;
+                        if (row.性別 === "男") target.male++;
+                        else if (row.性別 === "女") target.female++;
+
+                        if (target.blood[row.血液型] !== undefined) {
+                            target.blood[row.血液型]++;
+                        } else {
+                            target.blood.その他++;
+                        }
+
+                        target.members.push({
+                            id: row.番号, title: row.役職, name: row.氏名, gender: row.性別, blood: row.血液型
+                        });
+                    });
+
+                    const treeData = Object.keys(orgMap).map(key => {
+                        const item = orgMap[key];
+                        let summaryText = item.role === "assistant" 
+                            ? `役職: ${item.members[0].title}\n氏名: ${item.members[0].name}`
+                            : item.members.map(m => `${m.title}: ${m.name}`).join("\n");
+
+                        return {
+                            ...item,
+                            membersSummary: summaryText
+                        };
+                    });
+
+                    myDiagram.model = new go.TreeModel(treeData);
+                }
+            });
+        });
+
+        function showSidebar(nodeData) {
+            document.getElementById('sidebar-org-title').innerText = nodeData.org + " の詳細";
+            
+            const b = nodeData.blood;
+            document.getElementById('sidebar-summary').innerHTML = 
+                `<b>合計人数:</b> ${nodeData.total}名（男性: ${nodeData.male}名 / 女性: ${nodeData.female}名）<br>` +
+                `<b>血液型内訳:</b> A型: ${b.A}名 | B型: ${b.B}名 | O型: ${b.O}名 | AB型: ${b.AB}名`;
+
+            const tbody = document.getElementById('sidebar-member-tbody');
+            tbody.innerHTML = "";
+            nodeData.members.forEach(m => {
+                const tr = document.createElement('tr');
+                tr.innerHTML = `<td>${m.id}</td><td>${m.title}</td><td>${m.name}</td><td>${m.gender}</td><td>${m.blood}</td>`;
+                tbody.appendChild(tr);
+            });
+
+            document.getElementById('sidebar').classList.add('open');
+        }
+
+        function closeSidebar() {
+            document.getElementById('sidebar').classList.remove('open');
+        }
+
+        init();
+    </script>
+</body>
+</html>
