@@ -2,7 +2,7 @@
 <html lang="ja">
 <head>
     <meta charset="UTF-8">
-    <title>組織図サンプル（アシスタント左右配置・修正版）</title>
+    <title>組織図サンプル（完全中央揃え・重なり解消版）</title>
     <script src="https://unpkg.com/gojs/release/go.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.3.2/papaparse.min.js"></script>
     <style>
@@ -31,7 +31,7 @@
     <div id="main-container">
         <div id="controls">
             <input type="file" id="csvFile" accept=".csv" />
-            <span style="font-size: 12px; color: #666; margin-left: 10px;">※CSVを読み込むと、アシスタントが左右に配置されます。</span>
+            <span style="font-size: 12px; color: #666; margin-left: 10px;">※トップを基準に完全な左右対称で展開されます。</span>
         </div>
         <div id="myDiagramDiv"></div>
     </div>
@@ -57,57 +57,83 @@
         const $ = go.GraphObject.make;
         let myDiagram;
 
-        // 【カスタムレイアウト】アシスタントを左右に振り分け、線を再計算するクラス
         class SideTreeLayout extends go.TreeLayout {
             constructor() {
                 super();
             }
 
+            assignTreeVertexValues(v) {
+                super.assignTreeVertexValues(v);
+                if (!v.node) return;
+                
+                let assistantCount = 0;
+                // 通常のレイアウトネットワークから除外されたノードも取得
+                let it = v.node.findTreeChildrenNodes();
+                while(it.next()) {
+                    if (it.value.data.role === "assistant") assistantCount++;
+                }
+                
+                // アシスタントがいる場合、通常の部署を大きく下に押し下げる
+                if (assistantCount > 0) {
+                    let rows = Math.ceil(assistantCount / 2);
+                    v.layerSpacing = 100 + (rows * 150); 
+                }
+            }
+
             commitNodes() {
                 super.commitNodes();
-                if (this.network === null) return;
-
-                let rootVertex = null;
-                this.network.vertexes.each(v => {
-                    if (v.node !== null && v.node.data && v.node.data.role === "root") {
-                        rootVertex = v;
+                
+                // アシスタントノードを親ごとにグループ化
+                let parentToAssistants = new Map();
+                this.diagram.nodes.each(node => {
+                    if (node.data.role === "assistant") {
+                        let p = node.findTreeParentNode();
+                        if (p) {
+                            if (!parentToAssistants.has(p)) parentToAssistants.set(p, []);
+                            parentToAssistants.get(p).push(node);
+                        }
                     }
                 });
 
-                if (!rootVertex) return;
+                // アシスタントを空いたスペース（左右）へ手動配置
+                parentToAssistants.forEach((assistants, parent) => {
+                    let pX = parent.location.x + (parent.actualBounds.width / 2);
+                    let pY = parent.location.y + (parent.actualBounds.height / 2);
+                    let leftCount = 0;
+                    let rightCount = 0;
+                    
+                    let offsetX = 360; // 幹の線に被らないよう十分な横幅を確保
+                    let offsetY = 140;
 
-                let rootX = rootVertex.centerX;
-                let rootY = rootVertex.centerY;
-                let leftX = rootX - 220; // 左側へのオフセット
-                let rightX = rootX + 220; // 右側へのオフセット
-                let leftCount = 0;
-                let rightCount = 0;
-
-                rootVertex.destinationVertexes.each(v => {
-                    if (v.node !== null && v.node.data && v.node.data.role === "assistant") {
-                        if (leftCount <= rightCount) {
-                            v.centerX = leftX;
-                            v.centerY = rootY + (leftCount * 80);
+                    assistants.forEach((aNode, index) => {
+                        let cx, cy;
+                        if (index % 2 === 0) {
+                            cx = pX - offsetX;
+                            cy = pY + offsetY + (leftCount * 140);
                             leftCount++;
                         } else {
-                            v.centerX = rightX;
-                            v.centerY = rootY + (rightCount * 80);
+                            cx = pX + offsetX;
+                            cy = pY + offsetY + (rightCount * 140);
                             rightCount++;
                         }
-                        // ノードの実際の位置を強制更新
-                        v.node.position = new go.Point(
-                            v.centerX - v.node.actualBounds.width / 2, 
-                            v.centerY - v.node.actualBounds.height / 2
-                        );
-                    }
+                        aNode.location = new go.Point(cx - (aNode.actualBounds.width / 2), cy - (aNode.actualBounds.height / 2));
+                    });
                 });
             }
 
             commitLinks() {
                 super.commitLinks();
-                // 移動したアシスタントへの線を再描画
                 this.diagram.links.each(link => {
-                    if (link.toNode && link.toNode.data && link.toNode.data.role === "assistant") {
+                    if (link.toNode && link.toNode.data.role === "assistant") {
+                        let pNode = link.fromNode;
+                        let aNode = link.toNode;
+                        
+                        link.fromSpot = go.Spot.Bottom;
+                        if (aNode.location.x < pNode.location.x) {
+                            link.toSpot = go.Spot.Right;
+                        } else {
+                            link.toSpot = go.Spot.Left;
+                        }
                         link.invalidateRoute();
                     }
                 });
@@ -116,20 +142,24 @@
 
         function init() {
             myDiagram = $(go.Diagram, "myDiagramDiv", {
+                contentAlignment: go.Spot.Center, // トップノードを画面中央に
                 layout: $(SideTreeLayout, {
                     angle: 90,
-                    layerSpacing: 60,
-                    nodeSpacing: 40
+                    layerSpacing: 80,
+                    nodeSpacing: 80,
+                    alignment: go.TreeLayout.AlignmentCenterChildren // 子ノードを中央基準で配置
                 }),
                 "undoManager.isEnabled": true
             });
 
-            // ノードテンプレート
             myDiagram.nodeTemplate = $(go.Node, "Auto",
                 {
                     movable: true,
                     click: (e, node) => showSidebar(node.data)
                 },
+                // ★ここが鍵: assistantを標準の自動レイアウト計算から除外する
+                new go.Binding("isLayoutPositioned", "role", r => r !== "assistant"),
+                
                 $(go.Shape, "RoundedRectangle", { fill: "white", stroke: "#007acc", strokeWidth: 2, parameter1: 6 }),
                 $(go.Panel, "Vertical", { margin: 10, alignment: go.Spot.Left },
                     $(go.TextBlock, { font: "bold 14px sans-serif", stroke: "#333", margin: new go.Margin(0, 0, 4, 0) },
@@ -145,14 +175,12 @@
                 )
             );
 
-            // リンク（線）テンプレート
             myDiagram.linkTemplate = $(go.Link,
                 { routing: go.Link.Orthogonal, corner: 5 },
                 $(go.Shape, { strokeWidth: 1.5, stroke: "#007acc" })
             );
         }
 
-        // CSV読み込み＆データ構築
         document.getElementById('csvFile').addEventListener('change', function(e) {
             const file = e.target.files[0];
             if (!file) return;
@@ -167,8 +195,7 @@
                     data.forEach(row => {
                         if (!row.組織名) return;
 
-                        const isAssistant = row.role === "assistant";
-                        // アシスタント職は個人単位でノード化するため番号をキーにする
+                        const isAssistant = row.role && row.role.trim() === "assistant";
                         const nodeKey = isAssistant ? `${row.組織名}_${row.番号}` : row.組織名;
                         const parentKey = row.親組織名 === "なし" || !row.親組織名 ? "" : row.親組織名;
 
@@ -177,7 +204,7 @@
                                 key: nodeKey,
                                 parent: parentKey,
                                 org: isAssistant ? `${row.役職}: ${row.氏名}` : row.組織名,
-                                role: row.role ? row.role.trim() : "normal", // 余白除去＆デフォルト設定
+                                role: isAssistant ? "assistant" : "normal",
                                 total: 0, male: 0, female: 0,
                                 blood: { A: 0, B: 0, O: 0, AB: 0, その他: 0 },
                                 members: []
@@ -188,12 +215,8 @@
                         target.total++;
                         if (row.性別 === "男") target.male++;
                         else if (row.性別 === "女") target.female++;
-
-                        if (target.blood[row.血液型] !== undefined) {
-                            target.blood[row.血液型]++;
-                        } else {
-                            target.blood.その他++;
-                        }
+                        if (target.blood[row.血液型] !== undefined) target.blood[row.血液型]++;
+                        else target.blood.その他++;
 
                         target.members.push({
                             id: row.番号, title: row.役職, name: row.氏名, gender: row.性別, blood: row.血液型
@@ -205,11 +228,7 @@
                         let summaryText = item.role === "assistant" 
                             ? `役職: ${item.members[0].title}\n氏名: ${item.members[0].name}`
                             : item.members.map(m => `${m.title}: ${m.name}`).join("\n");
-
-                        return {
-                            ...item,
-                            membersSummary: summaryText
-                        };
+                        return { ...item, membersSummary: summaryText };
                     });
 
                     myDiagram.model = new go.TreeModel(treeData);
@@ -219,7 +238,6 @@
 
         function showSidebar(nodeData) {
             document.getElementById('sidebar-org-title').innerText = nodeData.org + " の詳細";
-            
             const b = nodeData.blood;
             document.getElementById('sidebar-summary').innerHTML = 
                 `<b>合計人数:</b> ${nodeData.total}名（男性: ${nodeData.male}名 / 女性: ${nodeData.female}名）<br>` +
@@ -232,7 +250,6 @@
                 tr.innerHTML = `<td>${m.id}</td><td>${m.title}</td><td>${m.name}</td><td>${m.gender}</td><td>${m.blood}</td>`;
                 tbody.appendChild(tr);
             });
-
             document.getElementById('sidebar').classList.add('open');
         }
 
