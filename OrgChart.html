@@ -2,9 +2,9 @@
 <html lang="ja">
 <head>
     <meta charset="UTF-8">
-    <title>組織図サンプル（アシスタント・実人数対応版）</title>
-    <script src="https://unpkg.com/gojs/release/go.js"></script>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.3.2/papaparse.min.js"></script>
+    <title>組織図</title>
+    <script src="./libraly/go.js"></script>
+    <script src="./libraly/papaparse.min.js"></script>
     <style>
         body { font-family: sans-serif; margin: 0; display: flex; height: 100vh; overflow: hidden; background: #fdfdfd; }
         #main-container { flex-grow: 1; display: flex; flex-direction: column; height: 100%; }
@@ -13,7 +13,7 @@
         #myDiagramDiv { flex-grow: 1; background: transparent; }
         
         #sidebar {
-            width: 440px; background: #fff; border-left: 1px solid #ccc;
+            width: 480px; background: #fff; border-left: 1px solid #ccc;
             box-shadow: -2px 0 5px rgba(0,0,0,0.1); display: flex; flex-direction: column;
             transform: translateX(100%); transition: transform 0.3s ease;
             position: absolute; right: 0; top: 0; height: 100%; z-index: 10;
@@ -39,7 +39,7 @@
         <div id="controls">
             <div class="control-row">
                 <input type="file" id="csvFile" accept=".csv" />
-                <span style="color: #666; font-size: 12px;">※CSVに「番号」と「所属区分（主務/兼務）」を含んだCSVに対応しています。</span>
+                <span style="color: #666; font-size: 12px;">※CSVファイルを読み込んで組織図を自動生成します。</span>
                 
                 <button class="btn-export" onclick="exportToSVG()">SVG保存</button>
             </div>
@@ -49,6 +49,7 @@
                 <label><input type="checkbox" class="disp-cb" id="cb-name" checked> 氏名</label>
                 <label><input type="checkbox" class="disp-cb" id="cb-gender"> 性別</label>
                 <label><input type="checkbox" class="disp-cb" id="cb-blood"> 血液型</label>
+                <label><input type="checkbox" class="disp-cb" id="cb-note"> 備考</label>
             </div>
         </div>
         <div id="myDiagramDiv"></div>
@@ -64,7 +65,7 @@
             <h4 style="margin: 0 0 5px 0; font-size: 14px;">所属メンバー一覧（この部署のみ）</h4>
             <table class="member-table">
                 <thead>
-                    <tr><th>ID</th><th>役職</th><th>氏名</th><th>区分</th></tr>
+                    <tr><th>ID</th><th>役職</th><th>氏名</th><th>区分</th><th>備考</th></tr>
                 </thead>
                 <tbody id="sidebar-member-tbody"></tbody>
             </table>
@@ -101,6 +102,7 @@
             const showName = document.getElementById('cb-name').checked;
             const showGender = document.getElementById('cb-gender').checked;
             const showBlood = document.getElementById('cb-blood').checked;
+            const showNote = document.getElementById('cb-note').checked;
 
             return members.map(m => {
                 let mainParts = [];
@@ -115,8 +117,13 @@
                 if (subParts.length > 0) {
                     text += text ? ` (${subParts.join("/")})` : `(${subParts.join("/")})`;
                 }
-                let suffix = m.kubunType === '兼務' ? ' [兼務]' : '';
-                return (text + suffix).trim();
+                if (m.kubunType === '兼務') {
+                    text += ' [兼務]';
+                }
+                if (showNote && m.note) {
+                    text += ` [${m.note}]`;
+                }
+                return text.trim();
             }).filter(t => t.length > 0).join("\n");
         }
 
@@ -138,7 +145,6 @@
             cb.addEventListener('change', updateAllNodesSummary);
         });
 
-        // ★ アシスタントを左右に振り分けて配置するカスタムレイアウト
         class SideTreeLayout extends go.TreeLayout {
             constructor() {
                 super();
@@ -156,7 +162,7 @@
                 
                 if (assistantCount > 0) {
                     let rows = Math.ceil(assistantCount / 2);
-                    v.layerSpacing = 80 + (rows * 120); 
+                    v.layerSpacing = 60 + (rows * 100); 
                 }
             }
 
@@ -181,17 +187,17 @@
                     let rightCount = 0;
                     
                     let offsetX = 340; 
-                    let offsetY = 120;
+                    let offsetY = 100;
 
                     assistants.forEach((aNode, index) => {
                         let cx, cy;
                         if (index % 2 === 0) {
                             cx = pX - offsetX;
-                            cy = pY + offsetY + (leftCount * 120);
+                            cy = pY + offsetY + (leftCount * 100);
                             leftCount++;
                         } else {
                             cx = pX + offsetX;
-                            cy = pY + offsetY + (rightCount * 120);
+                            cy = pY + offsetY + (rightCount * 100);
                             rightCount++;
                         }
                         aNode.location = new go.Point(cx - (aNode.actualBounds.width / 2), cy - (aNode.actualBounds.height / 2));
@@ -223,7 +229,7 @@
                 contentAlignment: go.Spot.Center,
                 layout: $(SideTreeLayout, {
                     angle: 90,
-                    layerSpacing: 70,
+                    layerSpacing: 60,
                     nodeSpacing: 70,
                     alignment: go.TreeLayout.AlignmentCenterChildren
                 }),
@@ -239,15 +245,22 @@
                 
                 $(go.Shape, "RoundedRectangle", { fill: "white", stroke: "#999", strokeWidth: 2, parameter1: 6 }),
                 
-                $(go.Panel, "Vertical", { margin: new go.Margin(6, 10, 6, 10), alignment: go.Spot.Left },
+                $(go.Panel, "Vertical", 
+                    new go.Binding("margin", "role", r => r === "assistant" ? new go.Margin(5, 8, 5, 8) : new go.Margin(6, 10, 6, 10)), 
+                    { alignment: go.Spot.Left },
+                    
                     $(go.TextBlock, { font: "bold 13px sans-serif", stroke: "#333", margin: new go.Margin(0, 0, 3, 0) },
-                        new go.Binding("text", "org")
+                        new go.Binding("text", "org", (org, obj) => obj.part.data.role === "assistant" ? "" : org),
+                        new go.Binding("visible", "role", r => r !== "assistant")
                     ),
                     $(go.TextBlock, { font: "10px sans-serif", stroke: "#666", margin: new go.Margin(0, 0, 6, 0) },
-                        new go.Binding("text", "", d => `延べ:${d.aggTotal}名 (実人数:${d.aggUniqueCount}名) [幹:${d.aggKanbu} 般:${d.aggIppan} 務:${d.aggJimu}]\n男:${d.aggMale} 女:${d.aggFemale} | A:${d.aggBlood.A} B:${d.aggBlood.B}`)
+                        new go.Binding("text", "", d => `延べ:${d.aggTotal}名 (実:${d.aggUniqueCount}名) [幹:${d.aggKanbu} 般:${d.aggIppan} 務:${d.aggJimu}]`),
+                        new go.Binding("visible", "role", r => r !== "assistant")
                     ),
-                    $(go.TextBlock, { font: "10px monospace", stroke: "#bbb", margin: new go.Margin(0, 0, 2, 0) }, "----------------------------------"),
-                    $(go.TextBlock, { font: "11px sans-serif", stroke: "#444", margin: new go.Margin(2, 0, 0, 0) },
+                    $(go.TextBlock, { font: "10px monospace", stroke: "#bbb", margin: new go.Margin(0, 0, 2, 0) }, "----------------------------------",
+                        new go.Binding("visible", "role", r => r !== "assistant")
+                    ),
+                    $(go.TextBlock, { font: "11px sans-serif", stroke: "#444", margin: new go.Margin(0, 0, 0, 0) },
                         new go.Binding("text", "membersSummary")
                     )
                 )
@@ -277,7 +290,6 @@
                     data.forEach(row => {
                         if (!row.組織名) return;
 
-                        // ★ アシスタント判定（社長室の副社長などを横配置にするための処理）
                         const isAssistant = row.role && row.role.trim() === "assistant";
                         const nodeKey = isAssistant ? `${row.組織名}_${row.番号}` : row.組織名;
                         const parentKey = row.親組織名 === "なし" || !row.親組織名 ? "" : row.親組織名;
@@ -286,7 +298,7 @@
                             orgMap[nodeKey] = {
                                 key: nodeKey,
                                 parent: parentKey,
-                                org: isAssistant ? `${row.役職}: ${row.氏名}` : row.組織名,
+                                org: row.組織名,
                                 role: isAssistant ? "assistant" : "normal",
                                 total: 0, male: 0, female: 0,
                                 kanbu: 0, ippan: 0, jimu: 0, otherClass: 0,
@@ -324,7 +336,8 @@
                             name: row.氏名, 
                             gender: row.性別, 
                             blood: row.血液型,
-                            kubunType: row.所属区分 ? row.所属区分.trim() : "主務"
+                            kubunType: row.所属区分 ? row.所属区分.trim() : "主務",
+                            note: row.備考 ? row.備考.trim() : ""
                         });
                     });
 
@@ -385,8 +398,8 @@
             });
         });
 
-        function showSidebar(nodeData) {
-            document.getElementById('sidebar-org-title').innerText = nodeData.org + " の詳細";
+function showSidebar(nodeData) {
+            document.getElementById('sidebar-org-title').innerText = nodeData.role === 'assistant' ? nodeData.members[0].title + ": " + nodeData.members[0].name + " の詳細" : nodeData.org + " の詳細";
             
             document.getElementById('sidebar-summary').innerHTML = 
                 `<div style="padding: 8px; background: #f1f3f5; border-radius: 4px; margin-bottom: 10px;">` +
@@ -395,7 +408,9 @@
                 `幹部: ${nodeData.aggKanbu} / 一般: ${nodeData.aggIppan} / 事務: ${nodeData.aggJimu}<br>` +
                 `</div>` +
                 `<div><b>【${nodeData.org} 単体】</b><br>` +
-                `延べ人数: ${nodeData.total}名 ／ 実人数: ${nodeData.uniqueIds.size}名</div>`;
+                `延べ人数: ${nodeData.total}名 ／ 実人数: ${nodeData.members.length}名<br>` +
+                `男女別: 男性${nodeData.male}名 ／ 女性: ${nodeData.female}名<br>` +
+                `血液型: A${nodeData.blood.A}名 ／ B${nodeData.blood.B}名 ／ AB${nodeData.blood.AB}名 ／ O${nodeData.blood.O}名</div>`;
 
             const tbody = document.getElementById('sidebar-member-tbody');
             tbody.innerHTML = "";
@@ -403,7 +418,7 @@
                 nodeData.members.forEach(m => {
                     const tr = document.createElement('tr');
                     let kubunColor = m.kubunType === '兼務' ? 'color: red; font-weight: bold;' : '';
-                    tr.innerHTML = `<td>${m.id}</td><td>${m.title}</td><td>${m.name}</td><td><span style="${kubunColor}">${m.kubunType}</span></td>`;
+                    tr.innerHTML = `<td>${m.id}</td><td>${m.title}</td><td>${m.name}</td><td><span style="${kubunColor}">${m.kubunType}</span></td><td>${m.note}</td>`;
                     tbody.appendChild(tr);
                 });
             }
