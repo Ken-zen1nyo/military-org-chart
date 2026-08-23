@@ -4,6 +4,8 @@
 
 <img width="1500" alt="image" src="https://github.com/user-attachments/assets/d3ac991c-b5c7-4a91-89ea-23af19ade6f9" />
 
+- ※サンプルデータは生成AIで作成したもの
+
 ---
 
 ## 💡 動作環境に関するご注意
