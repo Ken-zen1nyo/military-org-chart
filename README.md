@@ -3,6 +3,7 @@
 組織図データ（CSV）を読み込んで、階層構造を持つインタラクティブな組織図をブラウザ上に描画・管理するためのWebアプリケーションです。
 
 <img width="1500" alt="image" src="https://github.com/user-attachments/assets/d3ac991c-b5c7-4a91-89ea-23af19ade6f9" />
+
 ---
 
 ## 💡 動作環境に関するご注意
