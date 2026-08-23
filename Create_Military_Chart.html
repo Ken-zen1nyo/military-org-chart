@@ -26,11 +26,16 @@
         table.member-table th { background: #f8f9fa; }
         .close-btn { background: none; border: none; color: white; font-size: 18px; cursor: pointer; }
 
-        .btn-export {
+        .btn-action {
             background-color: #2196F3; color: white; padding: 5px 10px;
             border: none; border-radius: 4px; cursor: pointer; font-size: 12px;
         }
-        .btn-export:hover { background-color: #0b7dda; }
+        .btn-action:hover { background-color: #0b7dda; }
+        .btn-reset {
+            background-color: #6c757d; color: white; padding: 5px 10px;
+            border: none; border-radius: 4px; cursor: pointer; font-size: 12px;
+        }
+        .btn-reset:hover { background-color: #5a6268; }
     </style>
 </head>
 <body>
@@ -39,7 +44,9 @@
         <div id="controls">
             <div class="control-row">
                 <input type="file" id="csvFile" accept=".csv" />
-                <button class="btn-export" onclick="exportToSVG()">SVG保存</button>
+                <button class="btn-action" onclick="exportToSVG()">SVG保存</button>
+                <button class="btn-reset" onclick="resetRootView()">全体表示に戻す</button>
+                <span id="current-focus-label" style="font-size: 12px; color: #d9534f; font-weight: bold;"></span>
             </div>
             <div class="control-row">
                 <strong>ノード内表示:</strong>
@@ -74,6 +81,8 @@
     <script>
         const $ = go.GraphObject.make;
         let myDiagram;
+        let allCsvData = null; // 読み込んだ全CSVデータを保持
+        let currentRootOrg = null; // 現在フォーカスしているルート部隊名
 
         function exportToSVG() {
             if (!myDiagram || myDiagram.nodes.count === 0) {
@@ -234,10 +243,34 @@
                 "undoManager.isEnabled": true
             });
 
+            // 右クリックメニュー（コンテキストメニュー）の設定
             myDiagram.nodeTemplate = $(go.Node, "Auto",
                 {
                     movable: true,
-                    click: (e, node) => showSidebar(node.data)
+                    click: (e, node) => showSidebar(node.data),
+                    contextMenu: $(go.Adornment, "Vertical",
+                        $("ContextMenuButton",
+                            $(go.TextBlock, "この部隊をルートとして表示（以下のみ）"),
+                            {
+                                click: (e, obj) => {
+                                    let nodeData = obj.part.adornedPart.data;
+                                    if (nodeData && nodeData.org) {
+                                        currentRootOrg = nodeData.org;
+                                        document.getElementById('current-focus-label').innerText = `[フォーカス中: ${currentRootOrg}]`;
+                                        parseAndRender(allCsvData, currentRootOrg);
+                                    }
+                                }
+                            }
+                        ),
+                        $("ContextMenuButton",
+                            $(go.TextBlock, "全体表示に戻す"),
+                            {
+                                click: (e, obj) => {
+                                    resetRootView();
+                                }
+                            }
+                        )
+                    )
                 },
                 new go.Binding("isLayoutPositioned", "role", r => r !== "assistant"),
                 
@@ -247,10 +280,19 @@
                     new go.Binding("margin", "role", r => r === "assistant" ? new go.Margin(5, 8, 5, 8) : new go.Margin(6, 10, 6, 10)), 
                     { alignment: go.Spot.Left },
                     
-                    $(go.TextBlock, { font: "bold 13px sans-serif", stroke: "#222", margin: new go.Margin(0, 0, 3, 0) },
-                        new go.Binding("text", "org", (org, obj) => obj.part.data.role === "assistant" ? "" : org),
-                        new go.Binding("visible", "role", r => r !== "assistant")
+                    // 部隊名とツリー折りたたみボタンを並べる横並びパネル
+                    $(go.Panel, "Horizontal",
+                        { stretch: go.GraphObject.Horizontal, alignment: go.Spot.Left },
+                        $(go.TextBlock, { font: "bold 13px sans-serif", stroke: "#222", margin: new go.Margin(0, 0, 3, 0) },
+                            new go.Binding("text", "org", (org, obj) => obj.part.data.role === "assistant" ? "" : org),
+                            new go.Binding("visible", "role", r => r !== "assistant")
+                        ),
+                        $("TreeExpanderButton", {
+                            margin: new go.Margin(0, 0, 3, 8),
+                            alignment: go.Spot.Right
+                        })
                     ),
+
                     $(go.TextBlock, { font: "10px sans-serif", stroke: "#555", margin: new go.Margin(0, 0, 6, 0) },
                         new go.Binding("text", "", d => `${d.aggTotal}名 (兼務除く:${d.aggUniqueCount}名) \n 幹:${d.aggTotalKanbu}(${d.aggUniqueKanbu}) 曹:${d.aggTotalIppan}(${d.aggUniqueIppan}) 事:${d.aggTotalJimu}(${d.aggUniqueJimu})`),
                         new go.Binding("visible", "role", r => r !== "assistant")
@@ -274,6 +316,258 @@
             );
         }
 
+        // 指定部隊以下のすべての部隊名を再帰的に収集する関数
+        function getSubtreeOrgs(targetOrg, data) {
+            let childrenMap = new Map();
+            data.forEach(row => {
+                let org = row.部隊名 ? row.部隊名.trim() : "";
+                let parent = row.親部隊名 ? row.親部隊名.trim() : "";
+                if (!org) return;
+                if (!childrenMap.has(parent)) childrenMap.set(parent, new Set());
+                childrenMap.get(parent).add(org);
+            });
+
+            let resultOrgs = new Set();
+            let queue = [targetOrg];
+            resultOrgs.add(targetOrg);
+
+            while (queue.length > 0) {
+                let current = queue.shift();
+                if (childrenMap.has(current)) {
+                    childrenMap.get(current).forEach(child => {
+                        if (!resultOrgs.has(child)) {
+                            resultOrgs.add(child);
+                            queue.push(child);
+                        }
+                    });
+                }
+            }
+            return resultOrgs;
+        }
+
+        function parseAndRender(data, rootOrg = null) {
+            let targetData = data;
+
+            // 特定の部隊が指定されている場合、その部隊以下のデータのみを抽出し、起点部隊の親を空にする
+            if (rootOrg) {
+                let validOrgs = getSubtreeOrgs(rootOrg, data);
+                targetData = data.filter(row => {
+                    let org = row.部隊名 ? row.部隊名.trim() : "";
+                    return validOrgs.has(org);
+                }).map(row => {
+                    let org = row.部隊名 ? row.部隊名.trim() : "";
+                    if (org === rootOrg) {
+                        return { ...row, 親部隊名: "" }; // 最上位ルートにするため親部隊名を空にする
+                    }
+                    return row;
+                });
+            }
+
+            const orgMap = {};
+
+            targetData.forEach(row => {
+                const orgName = row.部隊名 ? row.部隊名.trim() : "";
+                const parentOrgName = row.親部隊名 ? row.親部隊名.trim() : "";
+                if (!orgName) return;
+
+                const rawRole = row.配置区分 || row.role || "";
+                const isAssistant = rawRole.trim() === "assistant" || rawRole.trim() === "スタッフ" || rawRole.trim() === "補佐";
+                const assignedRole = isAssistant ? "assistant" : "normal";
+
+                const nodeKey = isAssistant ? `${orgName}_${row.番号}` : orgName;
+                const parentKey = (parentOrgName === "なし" || !parentOrgName) ? "" : parentOrgName;
+
+                if (!orgMap[nodeKey]) {
+                    orgMap[nodeKey] = {
+                        key: nodeKey,
+                        parent: parentKey,
+                        org: orgName,
+                        role: assignedRole,
+                        members: [],
+                        childrenKeys: []
+                    };
+                }
+
+                const memberId = row.番号 ? row.番号.trim() : "";
+                const name = row.氏名 ? row.氏名.trim() : "";
+                const gender = row.性別 ? row.性別.trim() : "";
+                const branch = row.軍種 ? row.軍種.trim() : "";
+                const rank = row.階級 ? row.階級.trim() : (row.役職区分 ? row.役職区分.trim() : "");
+                const kubunType = row.所属区分 ? row.所属区分.trim() : "主務";
+                const note = row.備考 ? row.備考.trim() : "";
+
+                const kanbuList = ["将", "将補", "1佐", "2佐", "3佐", "1尉", "2尉", "3尉"];
+                const ippanList = ["准尉", "1曹", "2曹", "3曹", "士長", "1士", "2士", "3士"];
+
+                let category = "other";
+                if (kanbuList.some(k => rank.includes(k))) {
+                    category = "kanbu";
+                } else if (rank.startsWith('事') || rank.startsWith('技')) {
+                    category = "jimu";
+                } else if (ippanList.some(i => rank.includes(i))) {
+                    category = "ippan";
+                }
+
+                orgMap[nodeKey].members.push({
+                    id: memberId,
+                    title: row.役職,
+                    rank: rank,
+                    name: name,
+                    gender: gender,
+                    branch: branch,
+                    kubunType: kubunType,
+                    note: note,
+                    category: category
+                });
+            });
+
+            let rootKeys = [];
+            Object.keys(orgMap).forEach(key => {
+                const item = orgMap[key];
+                // 抽出後のデータ内で親が存在しないもの、あるいはルート指定に合致するものをルートキーとする
+                if (item.parent && orgMap[item.parent]) {
+                    orgMap[item.parent].childrenKeys.push(key);
+                } else {
+                    rootKeys.push(key);
+                }
+            });
+
+            function aggregateData(key) {
+                const node = orgMap[key];
+                let singleUniqueMap = new Map(); 
+                
+                let totalMale = 0, totalFemale = 0;
+                let totalKanbu = 0, totalIppan = 0, totalJimu = 0, totalOtherClass = 0;
+                let totalBranch = { 陸: 0, 海: 0, 空: 0, 統: 0, その他: 0 };
+
+                let uniqueMale = 0, uniqueFemale = 0;
+                let uniqueKanbu = 0, uniqueIppan = 0, uniqueJimu = 0, uniqueOtherClass = 0;
+                let uniqueBranch = { 陸: 0, 海: 0, 空: 0, 統: 0, その他: 0 };
+
+                node.members.forEach((m, index) => {
+                    if (m.gender === "男") totalMale++;
+                    else if (m.gender === "女") totalFemale++;
+
+                    if (totalBranch[m.branch] !== undefined) totalBranch[m.branch]++;
+                    else totalBranch.その他++;
+
+                    if (m.category === "kanbu") totalKanbu++;
+                    else if (m.category === "ippan") totalIppan++;
+                    else if (m.category === "jimu") totalJimu++;
+                    else totalOtherClass++;
+
+                    if (m.kubunType !== '兼務') {
+                        const uniqueKey = `${m.name}_${index}`;
+                        if (!singleUniqueMap.has(uniqueKey)) {
+                            singleUniqueMap.set(uniqueKey, m);
+
+                            if (m.gender === "男") uniqueMale++;
+                            else if (m.gender === "女") uniqueFemale++;
+
+                            if (uniqueBranch[m.branch] !== undefined) uniqueBranch[m.branch]++;
+                            else uniqueBranch.その他++;
+
+                            if (m.category === "kanbu") uniqueKanbu++;
+                            else if (m.category === "ippan") uniqueIppan++;
+                            else if (m.category === "jimu") uniqueJimu++;
+                            else uniqueOtherClass++;
+                        }
+                    }
+                });
+
+                node.total = node.members.length;
+                node.uniqueMembersMap = singleUniqueMap; 
+                
+                node.male = totalMale; node.uniqueMale = uniqueMale;
+                node.female = totalFemale; node.uniqueFemale = uniqueFemale;
+                node.kanbu = totalKanbu; node.uniqueKanbu = uniqueKanbu;
+                node.ippan = totalIppan; node.uniqueIppan = uniqueIppan;
+                node.jimu = totalJimu; node.uniqueJimu = uniqueJimu;
+                node.branchCount = totalBranch; node.uniqueBranchCount = uniqueBranch;
+
+                let allUniqueMap = new Map(singleUniqueMap);
+                node.childrenKeys.forEach(childKey => {
+                    const childAgg = aggregateData(childKey);
+                    childAgg.allUniqueMap.forEach((m, uKey) => {
+                        if (!allUniqueMap.has(uKey)) {
+                            allUniqueMap.set(uKey, m);
+                        }
+                    });
+                });
+
+                let aggTotalRows = node.total;
+                node.childrenKeys.forEach(childKey => {
+                    aggTotalRows += orgMap[childKey].aggTotal;
+                });
+
+                let aggTotalMale = totalMale, aggTotalFemale = totalFemale;
+                let aggTotalKanbu = totalKanbu, aggTotalIppan = totalIppan, aggTotalJimu = totalJimu;
+                let aggTotalBranch = { ...totalBranch };
+
+                node.childrenKeys.forEach(childKey => {
+                    const c = orgMap[childKey];
+                    aggTotalMale += c.aggTotalMale;
+                    aggTotalFemale += c.aggTotalFemale;
+                    aggTotalKanbu += c.aggTotalKanbu;
+                    aggTotalIppan += c.aggTotalIppan;
+                    aggTotalJimu += c.aggTotalJimu;
+                    aggTotalBranch.陸 += c.aggTotalBranch.陸;
+                    aggTotalBranch.海 += c.aggTotalBranch.海;
+                    aggTotalBranch.空 += c.aggTotalBranch.空;
+                    aggTotalBranch.統 += c.aggTotalBranch.統;
+                    aggTotalBranch.その他 += c.aggTotalBranch.その他;
+                });
+
+                let aggUniqueMale = 0, aggUniqueFemale = 0;
+                let aggUniqueKanbu = 0, aggUniqueIppan = 0, aggUniqueJimu = 0;
+                let aggUniqueBranch = { 陸: 0, 海: 0, 空: 0, 統: 0, その他: 0 };
+
+                allUniqueMap.forEach(m => {
+                    if (m.gender === "男") aggUniqueMale++;
+                    else if (m.gender === "女") aggUniqueFemale++;
+
+                    if (m.category === "kanbu") aggUniqueKanbu++;
+                    else if (m.category === "ippan") aggUniqueIppan++;
+                    else if (m.category === "jimu") aggUniqueJimu++;
+
+                    if (aggUniqueBranch[m.branch] !== undefined) aggUniqueBranch[m.branch]++;
+                    else aggUniqueBranch.その他++;
+                });
+
+                node.aggTotal = aggTotalRows;
+                node.aggUniqueCount = allUniqueMap.size;
+                
+                node.aggTotalMale = aggTotalMale; node.aggUniqueMale = aggUniqueMale;
+                node.aggTotalFemale = aggTotalFemale; node.aggUniqueFemale = aggUniqueFemale;
+                node.aggTotalKanbu = aggTotalKanbu; node.aggUniqueKanbu = aggUniqueKanbu;
+                node.aggTotalIppan = aggTotalIppan; node.aggUniqueIppan = aggUniqueIppan;
+                node.aggTotalJimu = aggTotalJimu; node.aggUniqueJimu = aggUniqueJimu;
+                node.aggTotalBranch = aggTotalBranch; node.aggUniqueBranch = aggUniqueBranch;
+                
+                node.allUniqueMap = allUniqueMap;
+
+                return node;
+            }
+
+            rootKeys.forEach(rootKey => aggregateData(rootKey));
+
+            const treeData = Object.keys(orgMap).map(key => {
+                const item = orgMap[key];
+                return { ...item, membersSummary: generateSummaryText(item.members) };
+            });
+
+            myDiagram.model = new go.TreeModel(treeData);
+        }
+
+        // 全体表示にリセットする関数
+        function resetRootView() {
+            currentRootOrg = null;
+            document.getElementById('current-focus-label').innerText = "";
+            if (allCsvData) {
+                parseAndRender(allCsvData, null);
+            }
+        }
+
         document.getElementById('csvFile').addEventListener('change', function(e) {
             const file = e.target.files[0];
             if (!file) return;
@@ -282,213 +576,10 @@
                 header: true,
                 skipEmptyLines: true,
                 complete: function(results) {
-                    const data = results.data;
-                    const orgMap = {};
-
-                    // 1. 全行走査してノードごとにメンバー格納
-                    data.forEach(row => {
-                        const orgName = row.部隊名 ? row.部隊名.trim() : "";
-                        const parentOrgName = row.親部隊名 ? row.親部隊名.trim() : "";
-                        if (!orgName) return;
-
-                        const rawRole = row.配置区分 || row.role || "";
-                        const isAssistant = rawRole.trim() === "assistant" || rawRole.trim() === "スタッフ" || rawRole.trim() === "補佐";
-                        const assignedRole = isAssistant ? "assistant" : "normal";
-
-                        const nodeKey = isAssistant ? `${orgName}_${row.番号}` : orgName;
-                        const parentKey = (parentOrgName === "なし" || !parentOrgName) ? "" : parentOrgName;
-
-                        if (!orgMap[nodeKey]) {
-                            orgMap[nodeKey] = {
-                                key: nodeKey,
-                                parent: parentKey,
-                                org: orgName,
-                                role: assignedRole,
-                                members: [],
-                                childrenKeys: []
-                            };
-                        }
-
-                        const memberId = row.番号 ? row.番号.trim() : "";
-                        const name = row.氏名 ? row.氏名.trim() : "";
-                        const gender = row.性別 ? row.性別.trim() : "";
-                        const branch = row.軍種 ? row.軍種.trim() : "";
-                        const rank = row.階級 ? row.階級.trim() : (row.役職区分 ? row.役職区分.trim() : "");
-                        const kubunType = row.所属区分 ? row.所属区分.trim() : "主務";
-                        const note = row.備考 ? row.備考.trim() : "";
-
-                        const kanbuList = ["将", "将補", "1佐", "2佐", "3佐", "1尉", "2尉", "3尉"];
-                        const ippanList = ["准尉", "1曹", "2曹", "3曹", "士長", "1士", "2士", "3士"];
-
-                        let category = "other";
-                        if (kanbuList.some(k => rank.includes(k))) {
-                            category = "kanbu";
-                        } else if (rank.startsWith('事') || rank.startsWith('技')) {
-                            // 階級が「事」または「技」で始まる場合は事務官等として判定
-                            category = "jimu";
-                        } else if (ippanList.some(i => rank.includes(i))) {
-                            category = "ippan";
-                        }
-
-                        orgMap[nodeKey].members.push({
-                            id: memberId,
-                            title: row.役職,
-                            rank: rank,
-                            name: name,
-                            gender: gender,
-                            branch: branch,
-                            kubunType: kubunType,
-                            note: note,
-                            category: category
-                        });
-                    });
-
-                    let rootKeys = [];
-                    Object.keys(orgMap).forEach(key => {
-                        const item = orgMap[key];
-                        if (item.parent && orgMap[item.parent]) {
-                            orgMap[item.parent].childrenKeys.push(key);
-                        } else {
-                            rootKeys.push(key);
-                        }
-                    });
-
-                    // 2. 単体および配下の集計（延べ・実人数の内訳をそれぞれ算出）
-                    function aggregateData(key) {
-                        const node = orgMap[key];
-                        
-                        let singleUniqueMap = new Map(); 
-                        
-                        // 単体：延べ（全行）ベースの内訳
-                        let totalMale = 0, totalFemale = 0;
-                        let totalKanbu = 0, totalIppan = 0, totalJimu = 0, totalOtherClass = 0;
-                        let totalBranch = { 陸: 0, 海: 0, 空: 0, 統: 0, その他: 0 };
-
-                        // 単体：実人数（兼務除外）ベースの内訳
-                        let uniqueMale = 0, uniqueFemale = 0;
-                        let uniqueKanbu = 0, uniqueIppan = 0, uniqueJimu = 0, uniqueOtherClass = 0;
-                        let uniqueBranch = { 陸: 0, 海: 0, 空: 0, 統: 0, その他: 0 };
-
-                        node.members.forEach((m, index) => {
-                            // 延べカウント（全行対象）
-                            if (m.gender === "男") totalMale++;
-                            else if (m.gender === "女") totalFemale++;
-
-                            if (totalBranch[m.branch] !== undefined) totalBranch[m.branch]++;
-                            else totalBranch.その他++;
-
-                            if (m.category === "kanbu") totalKanbu++;
-                            else if (m.category === "ippan") totalIppan++;
-                            else if (m.category === "jimu") totalJimu++;
-                            else totalOtherClass++;
-
-                            // 実人数カウント（兼務除外）
-                            if (m.kubunType !== '兼務') {
-                                const uniqueKey = `${m.name}_${index}`;
-                                if (!singleUniqueMap.has(uniqueKey)) {
-                                    singleUniqueMap.set(uniqueKey, m);
-
-                                    if (m.gender === "男") uniqueMale++;
-                                    else if (m.gender === "女") uniqueFemale++;
-
-                                    if (uniqueBranch[m.branch] !== undefined) uniqueBranch[m.branch]++;
-                                    else uniqueBranch.その他++;
-
-                                    if (m.category === "kanbu") uniqueKanbu++;
-                                    else if (m.category === "ippan") uniqueIppan++;
-                                    else if (m.category === "jimu") uniqueJimu++;
-                                    else uniqueOtherClass++;
-                                }
-                            }
-                        });
-
-                        node.total = node.members.length;
-                        node.uniqueMembersMap = singleUniqueMap; 
-                        
-                        // 単体プロパティ代入
-                        node.male = totalMale; node.uniqueMale = uniqueMale;
-                        node.female = totalFemale; node.uniqueFemale = uniqueFemale;
-                        node.kanbu = totalKanbu; node.uniqueKanbu = uniqueKanbu;
-                        node.ippan = totalIppan; node.uniqueIppan = uniqueIppan;
-                        node.jimu = totalJimu; node.uniqueJimu = uniqueJimu;
-                        node.branchCount = totalBranch; node.uniqueBranchCount = uniqueBranch;
-
-                        // 配下（子供）の集計を統合
-                        let allUniqueMap = new Map(singleUniqueMap);
-                        node.childrenKeys.forEach(childKey => {
-                            const childAgg = aggregateData(childKey);
-                            childAgg.allUniqueMap.forEach((m, uKey) => {
-                                if (!allUniqueMap.has(uKey)) {
-                                    allUniqueMap.set(uKey, m);
-                                }
-                            });
-                        });
-
-                        // 配下全体の集計値算出（延べ行数・実人数内訳）
-                        let aggTotalRows = node.total;
-                        node.childrenKeys.forEach(childKey => {
-                            aggTotalRows += orgMap[childKey].aggTotal;
-                        });
-
-                        // 配下全体：延べ内訳（子ノードの延べ値を合算）
-                        let aggTotalMale = totalMale, aggTotalFemale = totalFemale;
-                        let aggTotalKanbu = totalKanbu, aggTotalIppan = totalIppan, aggTotalJimu = totalJimu;
-                        let aggTotalBranch = { ...totalBranch };
-
-                        node.childrenKeys.forEach(childKey => {
-                            const c = orgMap[childKey];
-                            aggTotalMale += c.aggTotalMale;
-                            aggTotalFemale += c.aggTotalFemale;
-                            aggTotalKanbu += c.aggTotalKanbu;
-                            aggTotalIppan += c.aggTotalIppan;
-                            aggTotalJimu += c.aggTotalJimu;
-                            aggTotalBranch.陸 += c.aggTotalBranch.陸;
-                            aggTotalBranch.海 += c.aggTotalBranch.海;
-                            aggTotalBranch.空 += c.aggTotalBranch.空;
-                            aggTotalBranch.統 += c.aggTotalBranch.統;
-                            aggTotalBranch.その他 += c.aggTotalBranch.その他;
-                        });
-
-                        // 配下全体：実人数内訳（allUniqueMap をベースに再集計）
-                        let aggUniqueMale = 0, aggUniqueFemale = 0;
-                        let aggUniqueKanbu = 0, aggUniqueIppan = 0, aggUniqueJimu = 0;
-                        let aggUniqueBranch = { 陸: 0, 海: 0, 空: 0, 統: 0, その他: 0 };
-
-                        allUniqueMap.forEach(m => {
-                            if (m.gender === "男") aggUniqueMale++;
-                            else if (m.gender === "女") aggUniqueFemale++;
-
-                            if (m.category === "kanbu") aggUniqueKanbu++;
-                            else if (m.category === "ippan") aggUniqueIppan++;
-                            else if (m.category === "jimu") aggUniqueJimu++;
-
-                            if (aggUniqueBranch[m.branch] !== undefined) aggUniqueBranch[m.branch]++;
-                            else aggUniqueBranch.その他++;
-                        });
-
-                        node.aggTotal = aggTotalRows;
-                        node.aggUniqueCount = allUniqueMap.size;
-                        
-                        node.aggTotalMale = aggTotalMale; node.aggUniqueMale = aggUniqueMale;
-                        node.aggTotalFemale = aggTotalFemale; node.aggUniqueFemale = aggUniqueFemale;
-                        node.aggTotalKanbu = aggTotalKanbu; node.aggUniqueKanbu = aggUniqueKanbu;
-                        node.aggTotalIppan = aggTotalIppan; node.aggUniqueIppan = aggUniqueIppan;
-                        node.aggTotalJimu = aggTotalJimu; node.aggUniqueJimu = aggUniqueJimu;
-                        node.aggTotalBranch = aggTotalBranch; node.aggUniqueBranch = aggUniqueBranch;
-                        
-                        node.allUniqueMap = allUniqueMap;
-
-                        return node;
-                    }
-
-                    rootKeys.forEach(rootKey => aggregateData(rootKey));
-
-                    const treeData = Object.keys(orgMap).map(key => {
-                        const item = orgMap[key];
-                        return { ...item, membersSummary: generateSummaryText(item.members) };
-                    });
-
-                    myDiagram.model = new go.TreeModel(treeData);
+                    allCsvData = results.data;
+                    currentRootOrg = null;
+                    document.getElementById('current-focus-label').innerText = "";
+                    parseAndRender(allCsvData, null);
                 }
             });
         });
