@@ -13,7 +13,7 @@
         #myDiagramDiv { flex-grow: 1; background: transparent; }
         
         #sidebar {
-            width: 520px; background: #fff; border-left: 1px solid #ccc;
+            width: 540px; background: #fff; border-left: 1px solid #ccc;
             box-shadow: -2px 0 5px rgba(0,0,0,0.1); display: flex; flex-direction: column;
             transform: translateX(100%); transition: transform 0.3s ease;
             position: absolute; right: 0; top: 0; height: 100%; z-index: 10;
@@ -37,6 +37,22 @@
         }
         .btn-reset:hover { background-color: #5a6268; }
         .search-input { padding: 4px 8px; font-size: 12px; border: 1px solid #ccc; border-radius: 4px; width: 200px; }
+        
+        .summary-grid {
+            display: grid;
+            grid-template-columns: 75px 1fr;
+            row-gap: 4px;
+            column-gap: 8px;
+            font-size: 12px;
+            margin-top: 6px;
+        }
+        .summary-label {
+            font-weight: bold;
+            color: #333;
+        }
+        .summary-value {
+            color: #111;
+        }
     </style>
 </head>
 <body>
@@ -53,7 +69,7 @@
                 <strong>ノード内表示:</strong>
                 <label><input type="checkbox" class="disp-cb" id="cb-title" checked> 役職</label>
                 <label><input type="checkbox" class="disp-cb" id="cb-branch"> 軍種</label>
-                <label><input type="checkbox" class="disp-cb" id="cb-rank"> 階級</label>
+                <label><input type="checkbox" class="disp-cb" id="cb-rank" checked> 階級</label>
                 <label><input type="checkbox" class="disp-cb" id="cb-name" checked> 氏名</label>
                 <label><input type="checkbox" class="disp-cb" id="cb-gender"> 性別</label>
                 <label><input type="checkbox" class="disp-cb" id="cb-note"> 備考</label>
@@ -111,7 +127,6 @@
             URL.revokeObjectURL(url);
         }
 
-        // 指定の順番：役職、軍種、階級、氏名、性別、備考
         function generateSummaryText(members) {
             if (!members) return "";
             const showTitle = document.getElementById('cb-title').checked;
@@ -132,7 +147,7 @@
                 let text = parts.join(" ");
                 
                 if (m.kubunType === '兼務') {
-                    text += ' [兼務]';
+                    text += ' [兼]';
                 }
                 if (showNote && m.note) {
                     text += ` [${m.note}]`;
@@ -174,9 +189,14 @@
                     if (it.value.data.role === "assistant") assistantCount++;
                 }
                 
+                // アシスタントがいる場合、通常の子ノードを下へ大きく押し下げる
                 if (assistantCount > 0) {
                     let rows = Math.ceil(assistantCount / 2);
-                    v.layerSpacing = 60 + (rows * 100); 
+                    let rowHeight = 65; 
+                    // 通常の子ノードの分岐線をアシスタントの下へ通すための高さを確保
+                    v.layerSpacing = 20 + (rows * rowHeight) + 30; 
+                } else {
+                    v.layerSpacing = 30;
                 }
             }
 
@@ -196,31 +216,67 @@
 
                 parentToAssistants.forEach((assistants, parent) => {
                     let pX = parent.location.x + (parent.actualBounds.width / 2);
-                    let pY = parent.location.y + (parent.actualBounds.height / 2);
+                    let pY = parent.location.y + parent.actualBounds.height; 
                     let leftCount = 0;
                     let rightCount = 0;
                     
-                    let offsetX = 340; 
-                    let offsetY = 100;
+                    let offsetX = 135; 
+                    let offsetY = 20; // 線の分岐場所を確保するため親から20px離す
+                    let rowHeight = 65;
 
                     assistants.forEach((aNode, index) => {
                         let cx, cy;
                         if (index % 2 === 0) {
                             cx = pX - offsetX;
-                            cy = pY + offsetY + (leftCount * 100);
+                            cy = pY + offsetY + (leftCount * rowHeight);
                             leftCount++;
                         } else {
                             cx = pX + offsetX;
-                            cy = pY + offsetY + (rightCount * 100);
+                            cy = pY + offsetY + (rightCount * rowHeight);
                             rightCount++;
                         }
-                        aNode.location = new go.Point(cx - (aNode.actualBounds.width / 2), cy - (aNode.actualBounds.height / 2));
+                        aNode.location = new go.Point(cx - (aNode.actualBounds.width / 2), cy);
                     });
                 });
             }
 
             commitLinks() {
                 super.commitLinks();
+                
+                // 1. 各親ノードから出る「本流の線」と「アシスタントの線」の引き出し長さを完全に分離する
+                this.diagram.nodes.each(node => {
+                    let assistants = [];
+                    let regularChildrenLinks = [];
+                    
+                    let linkIt = node.findLinksOutOf();
+                    while(linkIt.next()) {
+                        let l = linkIt.value;
+                        if (l.toNode) {
+                            if (l.toNode.data.role === "assistant") {
+                                assistants.push(l.toNode);
+                            } else {
+                                regularChildrenLinks.push(l);
+                            }
+                        }
+                    }
+                    
+                    if (assistants.length > 0 && regularChildrenLinks.length > 0) {
+                        let rows = Math.ceil(assistants.length / 2);
+                        // 本流の分岐線（横線）をアシスタントノードの「さらに下」まで落とす
+                        let dropDistance = 20 + (rows * 65); 
+                        regularChildrenLinks.forEach(l => {
+                            l.fromEndSegmentLength = dropDistance;
+                            l.invalidateRoute();
+                        });
+                    } else if (regularChildrenLinks.length > 0) {
+                        regularChildrenLinks.forEach(l => {
+                            l.fromEndSegmentLength = 15;
+                            l.invalidateRoute();
+                        });
+                    }
+                });
+                
+                // 2. アシスタントへの線は親の底部から出し、アシスタントの横から入るよう調整
                 this.diagram.links.each(link => {
                     if (link.toNode && link.toNode.data.role === "assistant") {
                         let pNode = link.fromNode;
@@ -232,6 +288,8 @@
                         } else {
                             link.toSpot = go.Spot.Left;
                         }
+                        // アシスタントの分岐線（横線）はアシスタントノードの「上部空間（10px）」を通す
+                        link.fromEndSegmentLength = 10;
                         link.invalidateRoute();
                     }
                 });
@@ -243,8 +301,7 @@
                 contentAlignment: go.Spot.Center,
                 layout: $(SideTreeLayout, {
                     angle: 90,
-                    layerSpacing: 60,
-                    nodeSpacing: 70,
+                    nodeSpacing: 40,
                     alignment: go.TreeLayout.AlignmentCenterChildren
                 }),
                 "undoManager.isEnabled": true
@@ -256,7 +313,7 @@
                     click: (e, node) => showSidebar(node.data),
                     contextMenu: $(go.Adornment, "Vertical",
                         $("ContextMenuButton",
-                            $(go.TextBlock, "この部隊をルートとして表示（以下のみ）"),
+                            $(go.TextBlock, "この部隊をルートとして隷下を表示"),
                             {
                                 click: (e, obj) => {
                                     let nodeData = obj.part.adornedPart.data;
@@ -288,7 +345,7 @@
                 ),
                 
                 $(go.Panel, "Vertical", 
-                    new go.Binding("margin", "role", r => r === "assistant" ? new go.Margin(5, 8, 5, 8) : new go.Margin(6, 10, 6, 10)), 
+                    new go.Binding("margin", "role", r => r === "assistant" ? new go.Margin(3, 5, 3, 5) : new go.Margin(6, 10, 6, 10)), 
                     { alignment: go.Spot.Left },
                     
                     $(go.Panel, "Horizontal",
@@ -326,19 +383,14 @@
             );
         }
 
-        // 半角・全角および大文字・小文字を正規化するヘルパー関数
         function normalizeString(str) {
             if (!str) return "";
             return str
                 .toLowerCase()
-                // 全角英数を半角英数に変換
                 .replace(/[Ａ-Ｚａ-ｚ０-９]/g, s => String.fromCharCode(s.charCodeAt(0) - 0xFEE0))
-                // 半角カタカナを全角カタカナに変換（必要に応じて）
-                // 濁点・半濁点を考慮した正規化（NFKC）
                 .normalize('NFKC');
         }
 
-        // 検索機能（半角・全角を区別しない）
         function searchNode() {
             const rawKeyword = document.getElementById('searchInput').value.trim();
             const keyword = normalizeString(rawKeyword);
@@ -356,12 +408,10 @@
                 const data = node.data;
                 let match = false;
 
-                // 部隊名のチェック
                 if (data.org && normalizeString(data.org).includes(keyword)) {
                     match = true;
                 }
 
-                // 所属メンバー（役職、氏名、階級、備考など）のチェック
                 if (data.members && data.members.some(m => 
                     (m.name && normalizeString(m.name).includes(keyword)) ||
                     (m.title && normalizeString(m.title).includes(keyword)) ||
@@ -532,7 +582,7 @@
                     else totalOtherClass++;
 
                     if (m.kubunType !== '兼務') {
-                        const uniqueKey = `${m.name}_${index}`;
+                        const uniqueKey = m.id ? m.id : `${m.name}_${index}`;
                         if (!singleUniqueMap.has(uniqueKey)) {
                             singleUniqueMap.set(uniqueKey, m);
 
@@ -665,19 +715,21 @@
             
             document.getElementById('sidebar-summary').innerHTML = 
                 `<div style="padding: 8px; background: #f1f3f5; border-radius: 4px; margin-bottom: 10px;">` +
-                `<b>【部隊集計（配下含む・兼務除外反映）】</b><br>` +
-                `総人数 ——  ${nodeData.aggTotal}名 / 実人数: ${nodeData.aggUniqueCount}名<br>` +
-                `階級区分 —— 幹部 ${nodeData.aggTotalKanbu}(実:${nodeData.aggUniqueKanbu}) / 准曹士 ${nodeData.aggTotalIppan}(実:${nodeData.aggUniqueIppan}) / 事務官等 ${nodeData.aggTotalJimu}(実:${nodeData.aggUniqueJimu})<br>` +
-                `軍種別 —— 陸: ${nodeData.aggTotalBranch.陸}(実:${nodeData.aggUniqueBranch.陸}) / 海: ${nodeData.aggTotalBranch.海}(実:${nodeData.aggUniqueBranch.海}) / 空: ${nodeData.aggTotalBranch.空}(実:${nodeData.aggUniqueBranch.空})<br>` +
-                `男女別 —— 男性: ${nodeData.aggTotalMale}(実:${nodeData.aggUniqueMale}) / 女性: ${nodeData.aggTotalFemale}(実:${nodeData.aggUniqueFemale})` +
-                `</div>` +
+                `<b>【部隊集計（配下含む・兼務除外反映）】</b>` +
+                `<div class="summary-grid">` +
+                `<span class="summary-label">総人数:</span><span class="summary-value">${nodeData.aggTotal}名 / 実人数: ${nodeData.aggUniqueCount}名</span>` +
+                `<span class="summary-label">階級区分:</span><span class="summary-value">幹部 ${nodeData.aggTotalKanbu}(実:${nodeData.aggUniqueKanbu}) / 准曹士 ${nodeData.aggTotalIppan}(実:${nodeData.aggUniqueIppan}) / 事務官等 ${nodeData.aggTotalJimu}(実:${nodeData.aggUniqueJimu})</span>` +
+                `<span class="summary-label">軍種別:</span><span class="summary-value">陸: ${nodeData.aggTotalBranch.陸}(実:${nodeData.aggUniqueBranch.陸}) / 海: ${nodeData.aggTotalBranch.海}(実:${nodeData.aggUniqueBranch.海}) / 空: ${nodeData.aggTotalBranch.空}(実:${nodeData.aggUniqueBranch.空})</span>` +
+                `<span class="summary-label">男女別:</span><span class="summary-value">男性: ${nodeData.aggTotalMale}(実:${nodeData.aggUniqueMale}) / 女性: ${nodeData.aggTotalFemale}(実:${nodeData.aggUniqueFemale})</span>` +
+                `</div></div>` +
                 `<div style="padding: 8px; background: #f1f3f5; border-radius: 4px; margin-bottom: 10px;">` +
-                `<b>【${nodeData.org} 単体】</b><br>` +
-                `総人数 ——  ${nodeData.total}名 / 実人数: ${nodeData.uniqueMembersMap.size}名<br>` +
-                `階級区分 —— 幹部 ${nodeData.kanbu}(実:${nodeData.uniqueKanbu}) / 准曹士 ${nodeData.ippan}(実:${nodeData.uniqueIppan}) / 事務官等 ${nodeData.jimu}(実:${nodeData.uniqueJimu})<br>` +
-                `軍種別 —— 陸: ${nodeData.branchCount.陸}(実:${nodeData.uniqueBranchCount.陸}) / 海: ${nodeData.branchCount.海}(実:${nodeData.uniqueBranchCount.海}) / 空: ${nodeData.branchCount.空}(実:${nodeData.uniqueBranchCount.空})<br>` +
-                `男女別 —— 男性: ${nodeData.male}(実:${nodeData.uniqueMale}) / 女性: ${nodeData.female}(実:${nodeData.uniqueFemale})` +
-                `</div>`;
+                `<b>【${nodeData.org} 単体】</b>` +
+                `<div class="summary-grid">` +
+                `<span class="summary-label">総人数:</span><span class="summary-value">${nodeData.total}名 / 実人数: ${nodeData.uniqueMembersMap.size}名</span>` +
+                `<span class="summary-label">階級区分:</span><span class="summary-value">幹部 ${nodeData.kanbu}(実:${nodeData.uniqueKanbu}) / 准曹士 ${nodeData.ippan}(実:${nodeData.uniqueIppan}) / 事務官等 ${nodeData.jimu}(実:${nodeData.uniqueJimu})</span>` +
+                `<span class="summary-label">軍種別:</span><span class="summary-value">陸: ${nodeData.branchCount.陸}(実:${nodeData.uniqueBranchCount.陸}) / 海: ${nodeData.branchCount.海}(実:${nodeData.uniqueBranchCount.海}) / 空: ${nodeData.branchCount.空}(実:${nodeData.uniqueBranchCount.空})</span>` +
+                `<span class="summary-label">男女別:</span><span class="summary-value">男性: ${nodeData.male}(実:${nodeData.uniqueMale}) / 女性: ${nodeData.female}(実:${nodeData.uniqueFemale})</span>` +
+                `</div></div>`;
 
             const tbody = document.getElementById('sidebar-member-tbody');
             tbody.innerHTML = "";
