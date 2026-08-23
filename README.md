@@ -1,6 +1,18 @@
-# 部隊組織図ビジュアライザ (Military Organization Chart Visualizer)
+# 🌲 Militree (ミリツリー)
+> **Military Unit & Organization Visualizer**  
+> *CSVを1枚読み込むだけで、全Unit（部隊）のOrganization（組織）が爆速で生えてくるビジュアライザ*
 
-組織図データ（CSV）を読み込んで、階層構造を持つインタラクティブな組織図をブラウザ上に描画・管理するためのWebアプリケーションです。
+[![GitHub Repository](https://img.shields.io/badge/GitHub-military--org--chart-blue)](https://github.com/Ken-zen1nyo/military-org-chart)
+
+---
+
+## 概要 (Overview)
+
+**Militree (ミリツリー)** は、CSVフォーマットの人事・構造データを読み込み、複雑な階層構造を持つ部隊組織図（Military Organization Chart）をブラウザ上に動的かつインタラクティブに描画・管理するためのWebアプリケーションです。
+
+部隊（Unit）ごとの階層構造、補佐（Assistant）の配置、幹部・准曹士・事務官の自動区分、兼務者の集計除外ロジックなど、防衛・ミリタリー組織ならではの特殊な人事体系に完全対応しています。
+
+また、外部インターネット接続のない**クローズド環境（閉域網・オフライン環境）**での運用を前提に設計されており、安全かつ軽量に動作します。
 
 <img width="1500" alt="image" src="https://github.com/user-attachments/assets/d3ac991c-b5c7-4a91-89ea-23af19ade6f9" />
 
@@ -41,11 +53,11 @@
 本アプリケーションを動作させるためには、以下の構成でファイルを配置してください。
 
 ```
-  your-repository/
+  repository/
   ├── libraly/
   │   ├── go.js             # GoJSライブラリ（クローズド環境用）
   │   └── papaparse.min.js  # PapaParseライブラリ（クローズド環境用）
-  ├── MilOrgChart.html      # メインアプリケーションファイル
+  ├── Militree.html      # メインアプリケーションファイル
   └── README.md             # このドキュメント
 ```
 
@@ -111,7 +123,7 @@
 
 1. 本リポジトリのファイルをすべて同一フォルダに配置します。
 2. `libraly/` フォルダの中に必要なJSファイル（`go.js`, `papaparse.min.js`）が配置されていることを確認します（※オープン環境の場合はCDN等へ書き換え）。
-3. `MilOrgChart.html` をブラウザ（Chrome, Edge, Firefoxなど）で直接開きます。
+3. `Militree.html` をブラウザ（Chrome, Edge, Firefoxなど）で直接開きます。
 4. 画面上部の **ファイルを選択** ボタンから、上記の仕様に準拠したCSVファイルを読み込みます。
 
 ---
