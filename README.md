@@ -1,4 +1,4 @@
-# 🌲 Militree（ミリツリー）🪖 
+# 🪖 Militree（ミリツリー）🌲 
 > **Military Unit & Organization Visualizer**  
 > *CSVを読み込むだけで、全Unit（部隊）のOrganization（組織）のツリーが爆速で生えてくるビジュアライザ*
 
@@ -8,9 +8,11 @@
 
 ## 概要 (Overview)
 
-　**Militree (ミリツリー)** は、CSVフォーマットの組織構造データを読み込み、複雑な階層構造を持つ部隊組織図（Military Organization Chart）をブラウザ上に動的かつインタラクティブに描画・管理するためのWebアプリケーションです。  
+　**Militree (ミリツリー※)** は、CSVフォーマットの組織構造データを読み込み、複雑な階層構造を持つ部隊組織図（Military Organization Chart）をブラウザ上に動的かつインタラクティブに描画・管理するためのWebアプリケーションです。  
 　部隊（Unit）ごとの階層構造、補佐（Assistant）の配置、幹部・准曹士・事務官の自動区分、兼務者の集計除外ロジックなど、防衛・ミリタリー組織ならではの特殊な組織体系に対応しています。  
 　また、外部インターネット接続のない **クローズド環境（閉域網・オフライン環境）** での運用を前提に設計されており、安全かつ軽量に動作します。  
+
+   ※「ミリツリー」のアクセントは「ミリタリー」と同じ
 
 <img width="1500" alt="image" src="https://github.com/user-attachments/assets/d3ac991c-b5c7-4a91-89ea-23af19ade6f9" />
 
