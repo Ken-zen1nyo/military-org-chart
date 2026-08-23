@@ -36,6 +36,7 @@
             border: none; border-radius: 4px; cursor: pointer; font-size: 12px;
         }
         .btn-reset:hover { background-color: #5a6268; }
+        .search-input { padding: 4px 8px; font-size: 12px; border: 1px solid #ccc; border-radius: 4px; width: 200px; }
     </style>
 </head>
 <body>
@@ -56,6 +57,12 @@
                 <label><input type="checkbox" class="disp-cb" id="cb-name" checked> 氏名</label>
                 <label><input type="checkbox" class="disp-cb" id="cb-gender"> 性別</label>
                 <label><input type="checkbox" class="disp-cb" id="cb-note"> 備考</label>
+
+                <div style="margin-left: auto; display: flex; gap: 5px; align-items: center;">
+                    <input type="text" id="searchInput" class="search-input" placeholder="氏名、役職、部隊名で検索..." onkeydown="if(event.key==='Enter') searchNode();" />
+                    <button class="btn-action" onclick="searchNode()">検索</button>
+                    <button class="btn-reset" onclick="clearSearch()">クリア</button>
+                </div>
             </div>
         </div>
         <div id="myDiagramDiv"></div>
@@ -81,8 +88,8 @@
     <script>
         const $ = go.GraphObject.make;
         let myDiagram;
-        let allCsvData = null; // 読み込んだ全CSVデータを保持
-        let currentRootOrg = null; // 現在フォーカスしているルート部隊名
+        let allCsvData = null; 
+        let currentRootOrg = null; 
 
         function exportToSVG() {
             if (!myDiagram || myDiagram.nodes.count === 0) {
@@ -243,7 +250,6 @@
                 "undoManager.isEnabled": true
             });
 
-            // 右クリックメニュー（コンテキストメニュー）の設定
             myDiagram.nodeTemplate = $(go.Node, "Auto",
                 {
                     movable: true,
@@ -274,13 +280,17 @@
                 },
                 new go.Binding("isLayoutPositioned", "role", r => r !== "assistant"),
                 
-                $(go.Shape, "RoundedRectangle", { fill: "white", stroke: "#555", strokeWidth: 2, parameter1: 6 }),
+                $(go.Shape, "RoundedRectangle", 
+                    { fill: "white", stroke: "#555", strokeWidth: 2, parameter1: 6 },
+                    new go.Binding("stroke", "isHighlighted", h => h ? "#ff4d4f" : "#555").ofObject(),
+                    new go.Binding("strokeWidth", "isHighlighted", h => h ? 3 : 2).ofObject(),
+                    new go.Binding("fill", "isHighlighted", h => h ? "#fff1f0" : "white").ofObject()
+                ),
                 
                 $(go.Panel, "Vertical", 
                     new go.Binding("margin", "role", r => r === "assistant" ? new go.Margin(5, 8, 5, 8) : new go.Margin(6, 10, 6, 10)), 
                     { alignment: go.Spot.Left },
                     
-                    // 部隊名とツリー折りたたみボタンを並べる横並びパネル
                     $(go.Panel, "Horizontal",
                         { stretch: go.GraphObject.Horizontal, alignment: go.Spot.Left },
                         $(go.TextBlock, { font: "bold 13px sans-serif", stroke: "#222", margin: new go.Margin(0, 0, 3, 0) },
@@ -316,7 +326,74 @@
             );
         }
 
-        // 指定部隊以下のすべての部隊名を再帰的に収集する関数
+        // 半角・全角および大文字・小文字を正規化するヘルパー関数
+        function normalizeString(str) {
+            if (!str) return "";
+            return str
+                .toLowerCase()
+                // 全角英数を半角英数に変換
+                .replace(/[Ａ-Ｚａ-ｚ０-９]/g, s => String.fromCharCode(s.charCodeAt(0) - 0xFEE0))
+                // 半角カタカナを全角カタカナに変換（必要に応じて）
+                // 濁点・半濁点を考慮した正規化（NFKC）
+                .normalize('NFKC');
+        }
+
+        // 検索機能（半角・全角を区別しない）
+        function searchNode() {
+            const rawKeyword = document.getElementById('searchInput').value.trim();
+            const keyword = normalizeString(rawKeyword);
+            if (!keyword) {
+                clearSearch();
+                return;
+            }
+
+            myDiagram.startTransaction("search");
+            myDiagram.nodes.each(n => n.isHighlighted = false);
+
+            let firstFoundNode = null;
+
+            myDiagram.nodes.each(node => {
+                const data = node.data;
+                let match = false;
+
+                // 部隊名のチェック
+                if (data.org && normalizeString(data.org).includes(keyword)) {
+                    match = true;
+                }
+
+                // 所属メンバー（役職、氏名、階級、備考など）のチェック
+                if (data.members && data.members.some(m => 
+                    (m.name && normalizeString(m.name).includes(keyword)) ||
+                    (m.title && normalizeString(m.title).includes(keyword)) ||
+                    (m.rank && normalizeString(m.rank).includes(keyword)) ||
+                    (m.note && normalizeString(m.note).includes(keyword))
+                )) {
+                    match = true;
+                }
+
+                if (match) {
+                    node.isHighlighted = true;
+                    if (!firstFoundNode) firstFoundNode = node;
+                }
+            });
+
+            myDiagram.commitTransaction("search");
+
+            if (firstFoundNode) {
+                myDiagram.centerRect(firstFoundNode.actualBounds);
+                myDiagram.select(firstFoundNode);
+            } else {
+                alert("一致する部隊またはメンバーが見つかりませんでした。");
+            }
+        }
+
+        function clearSearch() {
+            document.getElementById('searchInput').value = "";
+            myDiagram.startTransaction("clear search");
+            myDiagram.nodes.each(n => n.isHighlighted = false);
+            myDiagram.commitTransaction("clear search");
+        }
+
         function getSubtreeOrgs(targetOrg, data) {
             let childrenMap = new Map();
             data.forEach(row => {
@@ -348,7 +425,6 @@
         function parseAndRender(data, rootOrg = null) {
             let targetData = data;
 
-            // 特定の部隊が指定されている場合、その部隊以下のデータのみを抽出し、起点部隊の親を空にする
             if (rootOrg) {
                 let validOrgs = getSubtreeOrgs(rootOrg, data);
                 targetData = data.filter(row => {
@@ -357,7 +433,7 @@
                 }).map(row => {
                     let org = row.部隊名 ? row.部隊名.trim() : "";
                     if (org === rootOrg) {
-                        return { ...row, 親部隊名: "" }; // 最上位ルートにするため親部隊名を空にする
+                        return { ...row, 親部隊名: "" }; 
                     }
                     return row;
                 });
@@ -424,7 +500,6 @@
             let rootKeys = [];
             Object.keys(orgMap).forEach(key => {
                 const item = orgMap[key];
-                // 抽出後のデータ内で親が存在しないもの、あるいはルート指定に合致するものをルートキーとする
                 if (item.parent && orgMap[item.parent]) {
                     orgMap[item.parent].childrenKeys.push(key);
                 } else {
@@ -559,10 +634,10 @@
             myDiagram.model = new go.TreeModel(treeData);
         }
 
-        // 全体表示にリセットする関数
         function resetRootView() {
             currentRootOrg = null;
             document.getElementById('current-focus-label').innerText = "";
+            clearSearch();
             if (allCsvData) {
                 parseAndRender(allCsvData, null);
             }
@@ -579,6 +654,7 @@
                     allCsvData = results.data;
                     currentRootOrg = null;
                     document.getElementById('current-focus-label').innerText = "";
+                    clearSearch();
                     parseAndRender(allCsvData, null);
                 }
             });
