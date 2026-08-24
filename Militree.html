@@ -69,7 +69,7 @@
                 <strong>ノード内表示:</strong>
                 <label><input type="checkbox" class="disp-cb" id="cb-title" checked> 役職</label>
                 <label><input type="checkbox" class="disp-cb" id="cb-branch"> 軍種</label>
-                <label><input type="checkbox" class="disp-cb" id="cb-rank"> 階級</label>
+                <label><input type="checkbox" class="disp-cb" id="cb-rank" checked> 階級</label>
                 <label><input type="checkbox" class="disp-cb" id="cb-name" checked> 氏名</label>
                 <label><input type="checkbox" class="disp-cb" id="cb-gender"> 性別</label>
                 <label><input type="checkbox" class="disp-cb" id="cb-note"> 備考</label>
@@ -552,7 +552,7 @@
                 
                 if (kanbuList.some(k => normalizedRank.includes(k))) {
                     category = "kanbu";
-                } else if (normalizedRank.startsWith('事') || normalizedRank.startsWith('技')) {
+                } else if (normalizedRank.startsWith('行') || normalizedRank.startsWith('研')) {
                     category = "jimu";
                 } else if (ippanList.some(i => normalizedRank.includes(i))) {
                     category = "ippan";
