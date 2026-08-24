@@ -174,7 +174,7 @@
             cb.addEventListener('change', updateAllNodesSummary);
         });
 
-        // ---------------------------------------------------------
+// ---------------------------------------------------------
         // サイドツリー（アシスタント配置用）の高度なレイアウト計算
         // ---------------------------------------------------------
         class SideTreeLayout extends go.TreeLayout {
@@ -186,25 +186,36 @@
                 super.assignTreeVertexValues(v);
                 if (!v.node) return;
                 
-                let totalAsstHeight = 0;
-                let asstCount = 0;
+                let leftH = 0;
+                let rightH = 0;
+                let index = 0;
+                
+                // アシスタントの実際の高さを左右それぞれ正確に合算する
                 let it = v.node.findTreeChildrenNodes();
                 while(it.next()) {
                     let child = it.value;
                     if (child.data.role === "assistant") {
-                        // アシスタントノードの高さ＋余白を合算
-                        totalAsstHeight += child.actualBounds.height + 15;
-                        asstCount++;
+                        let h = child.actualBounds.height + 15;
+                        if (index % 2 === 0) leftH += h;
+                        else rightH += h;
+                        index++;
                     }
                 }
                 
-                if (asstCount > 0) {
-                    // 左右に分割されることを考慮し、高い方の列のおおよその高さを計算
-                    let estimatedDrop = (totalAsstHeight / 2) + 40; 
-                    v.layerSpacing = estimatedDrop;
+                let maxAsstHeight = Math.max(leftH, rightH);
+                // アシスタント群を完全にやり過ごすための必須ドロップ距離
+                let requiredDrop = 15 + maxAsstHeight + 15; 
+
+                if (maxAsstHeight > 0) {
+                    // 下位部隊は、必須ドロップ距離よりもさらに「30px」下に配置することで、
+                    // 線が絶対に上に逆戻り（ジグザグ）しないようにする
+                    v.layerSpacing = requiredDrop + 30; 
                 } else {
-                    v.layerSpacing = 30;
+                    v.layerSpacing = 40;
                 }
+                
+                // リンク描画用に距離を保存
+                v.node.dropDistance = requiredDrop;
             }
 
             commitNodes() {
@@ -225,13 +236,12 @@
                     let pX = parent.location.x + (parent.actualBounds.width / 2);
                     let pY = parent.location.y + parent.actualBounds.height; 
                     
-                    let offsetX = 160; // 複数人入って箱が太っても被らないように広めに確保
+                    let offsetX = 160; 
                     let offsetY = 15; 
                     
                     let leftY = pY + offsetY;
                     let rightY = pY + offsetY;
 
-                    // アシスタントノードを左右に振り分けつつ、実際の高さに合わせて縦に積み上げる
                     assistants.forEach((aNode, index) => {
                         let cx;
                         if (index % 2 === 0) {
@@ -244,9 +254,6 @@
                             rightY += aNode.actualBounds.height + 15;
                         }
                     });
-                    
-                    // 下位部隊へ向かう「本流の縦線」が、アシスタントの箱を完全にやり過ごせる距離を計算して親ノードに記憶
-                    parent.dropDistance = Math.max(leftY, rightY) - pY + 10;
                 });
             }
 
@@ -270,15 +277,15 @@
                     }
                     
                     if (assistants.length > 0 && regularChildrenLinks.length > 0) {
-                        // 記憶した距離まで縦線を伸ばしてから横に分岐させる
-                        let dropDistance = node.dropDistance || 50; 
+                        // assignTreeVertexValues で計算した正確な距離を使用
+                        let dropDist = node.dropDistance || 50; 
                         regularChildrenLinks.forEach(l => {
-                            l.fromEndSegmentLength = dropDistance;
+                            l.fromEndSegmentLength = dropDist;
                             l.invalidateRoute();
                         });
                     } else if (regularChildrenLinks.length > 0) {
                         regularChildrenLinks.forEach(l => {
-                            l.fromEndSegmentLength = 15;
+                            l.fromEndSegmentLength = 20;
                             l.invalidateRoute();
                         });
                     }
@@ -316,12 +323,12 @@
                 layout: $(SideTreeLayout, {
                     angle: 90,
                     nodeSpacing: 40,
+                    layerStyle: go.TreeLayout.LayerUniform, // ★階層の高さを水平に揃える
                     alignment: go.TreeLayout.AlignmentCenterChildren
                 }),
                 "undoManager.isEnabled": true
             });
 
-            // ノードの見た目はアシスタントも通常ノードも全く同じに統一
             myDiagram.nodeTemplate = $(go.Node, "Auto",
                 {
                     movable: true,
@@ -366,7 +373,9 @@
                     $(go.Panel, "Horizontal",
                         { stretch: go.GraphObject.Horizontal, alignment: go.Spot.Left },
                         $(go.TextBlock, { font: "bold 13px sans-serif", stroke: "#222", margin: new go.Margin(0, 0, 3, 0) },
-                            new go.Binding("text", "dispName")
+                            new go.Binding("text", "dispName"),
+                            // ★ 追加: アシスタントかつ1名の場合は部隊名（表示名）を非表示にする
+                            new go.Binding("visible", "", d => !(d.role === "assistant" && d.members && d.members.length === 1))
                         ),
                         $("TreeExpanderButton", {
                             margin: new go.Margin(0, 0, 3, 8),
@@ -375,9 +384,14 @@
                     ),
 
                     $(go.TextBlock, { font: "10px sans-serif", stroke: "#555", margin: new go.Margin(0, 0, 6, 0) },
-                        new go.Binding("text", "", d => `${d.aggTotal}名 (兼務除く:${d.aggUniqueCount}名) \n 幹:${d.aggTotalKanbu}(${d.aggUniqueKanbu}) 曹:${d.aggTotalIppan}(${d.aggUniqueIppan}) 事:${d.aggTotalJimu}(${d.aggUniqueJimu})`)
+                        new go.Binding("text", "", d => `${d.aggTotal}名 (兼務除く:${d.aggUniqueCount}名) \n 幹:${d.aggTotalKanbu}(${d.aggUniqueKanbu}) 曹:${d.aggTotalIppan}(${d.aggUniqueIppan}) 事:${d.aggTotalJimu}(${d.aggUniqueJimu})`),
+                        // ★ 追加: アシスタントの場合は集計テキストを非表示にする
+                        new go.Binding("visible", "role", r => r !== "assistant")
                     ),
-                    $(go.TextBlock, { font: "10px monospace", stroke: "#bbb", margin: new go.Margin(0, 0, 2, 0) }, "--------------------"),
+                    $(go.TextBlock, { font: "10px monospace", stroke: "#bbb", margin: new go.Margin(0, 0, 2, 0) }, "--------------------",
+                        // ★ 追加: アシスタントの場合は区切り線を非表示にする
+                        new go.Binding("visible", "role", r => r !== "assistant")
+                    ),
                     $(go.TextBlock, { font: "11px sans-serif", stroke: "#333", margin: new go.Margin(0, 0, 0, 0) },
                         new go.Binding("text", "membersSummary")
                     )
@@ -507,7 +521,6 @@
                 const isAssistant = rawRole.trim() === "assistant" || rawRole.trim() === "スタッフ" || rawRole.trim() === "補佐";
                 const assignedRole = isAssistant ? "assistant" : "normal";
 
-                // ★ ノードキーは素直に「部隊名」、親キーも素直に「親部隊名」を使用する
                 const nodeKey = orgName;
                 const parentKey = (parentOrgName === "なし" || !parentOrgName) ? "" : parentOrgName;
 
@@ -517,7 +530,7 @@
                         parent: parentKey,
                         org: orgName,
                         dispName: dispName,
-                        role: assignedRole, // assistantとして認識されればレイアウト時に横に配置される
+                        role: assignedRole,
                         members: [],
                         childrenKeys: []
                     };
