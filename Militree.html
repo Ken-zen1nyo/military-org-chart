@@ -2,7 +2,7 @@
 <html lang="ja">
 <head>
     <meta charset="UTF-8">
-    <title>部隊組織図</title>
+    <title>Militree (部隊組織図)</title>
     <script src="./libraly/go.js"></script>
     <script src="./libraly/papaparse.min.js"></script>
     <style>
@@ -69,7 +69,7 @@
                 <strong>ノード内表示:</strong>
                 <label><input type="checkbox" class="disp-cb" id="cb-title" checked> 役職</label>
                 <label><input type="checkbox" class="disp-cb" id="cb-branch"> 軍種</label>
-                <label><input type="checkbox" class="disp-cb" id="cb-rank" checked> 階級</label>
+                <label><input type="checkbox" class="disp-cb" id="cb-rank"> 階級</label>
                 <label><input type="checkbox" class="disp-cb" id="cb-name" checked> 氏名</label>
                 <label><input type="checkbox" class="disp-cb" id="cb-gender"> 性別</label>
                 <label><input type="checkbox" class="disp-cb" id="cb-note"> 備考</label>
@@ -174,6 +174,9 @@
             cb.addEventListener('change', updateAllNodesSummary);
         });
 
+        // ---------------------------------------------------------
+        // サイドツリー（アシスタント配置用）の高度なレイアウト計算
+        // ---------------------------------------------------------
         class SideTreeLayout extends go.TreeLayout {
             constructor() {
                 super();
@@ -183,18 +186,22 @@
                 super.assignTreeVertexValues(v);
                 if (!v.node) return;
                 
-                let assistantCount = 0;
+                let totalAsstHeight = 0;
+                let asstCount = 0;
                 let it = v.node.findTreeChildrenNodes();
                 while(it.next()) {
-                    if (it.value.data.role === "assistant") assistantCount++;
+                    let child = it.value;
+                    if (child.data.role === "assistant") {
+                        // アシスタントノードの高さ＋余白を合算
+                        totalAsstHeight += child.actualBounds.height + 15;
+                        asstCount++;
+                    }
                 }
                 
-                // アシスタントがいる場合、通常の子ノードを下へ大きく押し下げる
-                if (assistantCount > 0) {
-                    let rows = Math.ceil(assistantCount / 2);
-                    let rowHeight = 65; 
-                    // 通常の子ノードの分岐線をアシスタントの下へ通すための高さを確保
-                    v.layerSpacing = 20 + (rows * rowHeight) + 30; 
+                if (asstCount > 0) {
+                    // 左右に分割されることを考慮し、高い方の列のおおよその高さを計算
+                    let estimatedDrop = (totalAsstHeight / 2) + 40; 
+                    v.layerSpacing = estimatedDrop;
                 } else {
                     v.layerSpacing = 30;
                 }
@@ -217,33 +224,35 @@
                 parentToAssistants.forEach((assistants, parent) => {
                     let pX = parent.location.x + (parent.actualBounds.width / 2);
                     let pY = parent.location.y + parent.actualBounds.height; 
-                    let leftCount = 0;
-                    let rightCount = 0;
                     
-                    let offsetX = 135; 
-                    let offsetY = 20; // 線の分岐場所を確保するため親から20px離す
-                    let rowHeight = 65;
+                    let offsetX = 160; // 複数人入って箱が太っても被らないように広めに確保
+                    let offsetY = 15; 
+                    
+                    let leftY = pY + offsetY;
+                    let rightY = pY + offsetY;
 
+                    // アシスタントノードを左右に振り分けつつ、実際の高さに合わせて縦に積み上げる
                     assistants.forEach((aNode, index) => {
-                        let cx, cy;
+                        let cx;
                         if (index % 2 === 0) {
                             cx = pX - offsetX;
-                            cy = pY + offsetY + (leftCount * rowHeight);
-                            leftCount++;
+                            aNode.location = new go.Point(cx - (aNode.actualBounds.width / 2), leftY);
+                            leftY += aNode.actualBounds.height + 15;
                         } else {
                             cx = pX + offsetX;
-                            cy = pY + offsetY + (rightCount * rowHeight);
-                            rightCount++;
+                            aNode.location = new go.Point(cx - (aNode.actualBounds.width / 2), rightY);
+                            rightY += aNode.actualBounds.height + 15;
                         }
-                        aNode.location = new go.Point(cx - (aNode.actualBounds.width / 2), cy);
                     });
+                    
+                    // 下位部隊へ向かう「本流の縦線」が、アシスタントの箱を完全にやり過ごせる距離を計算して親ノードに記憶
+                    parent.dropDistance = Math.max(leftY, rightY) - pY + 10;
                 });
             }
 
             commitLinks() {
                 super.commitLinks();
                 
-                // 1. 各親ノードから出る「本流の線」と「アシスタントの線」の引き出し長さを完全に分離する
                 this.diagram.nodes.each(node => {
                     let assistants = [];
                     let regularChildrenLinks = [];
@@ -261,9 +270,8 @@
                     }
                     
                     if (assistants.length > 0 && regularChildrenLinks.length > 0) {
-                        let rows = Math.ceil(assistants.length / 2);
-                        // 本流の分岐線（横線）をアシスタントノードの「さらに下」まで落とす
-                        let dropDistance = 20 + (rows * 65); 
+                        // 記憶した距離まで縦線を伸ばしてから横に分岐させる
+                        let dropDistance = node.dropDistance || 50; 
                         regularChildrenLinks.forEach(l => {
                             l.fromEndSegmentLength = dropDistance;
                             l.invalidateRoute();
@@ -276,7 +284,6 @@
                     }
                 });
                 
-                // 2. アシスタントへの線は親の底部から出し、アシスタントの横から入るよう調整
                 this.diagram.links.each(link => {
                     if (link.toNode && link.toNode.data.role === "assistant") {
                         let pNode = link.fromNode;
@@ -288,12 +295,19 @@
                         } else {
                             link.toSpot = go.Spot.Left;
                         }
-                        // アシスタントの分岐線（横線）はアシスタントノードの「上部空間（10px）」を通す
                         link.fromEndSegmentLength = 10;
                         link.invalidateRoute();
                     }
                 });
             }
+        }
+
+        function normalizeString(str) {
+            if (!str) return "";
+            return str
+                .toLowerCase()
+                .replace(/[Ａ-Ｚａ-ｚ０-９]/g, s => String.fromCharCode(s.charCodeAt(0) - 0xFEE0))
+                .normalize('NFKC');
         }
 
         function init() {
@@ -307,6 +321,7 @@
                 "undoManager.isEnabled": true
             });
 
+            // ノードの見た目はアシスタントも通常ノードも全く同じに統一
             myDiagram.nodeTemplate = $(go.Node, "Auto",
                 {
                     movable: true,
@@ -351,8 +366,7 @@
                     $(go.Panel, "Horizontal",
                         { stretch: go.GraphObject.Horizontal, alignment: go.Spot.Left },
                         $(go.TextBlock, { font: "bold 13px sans-serif", stroke: "#222", margin: new go.Margin(0, 0, 3, 0) },
-                            new go.Binding("text", "org", (org, obj) => obj.part.data.role === "assistant" ? "" : org),
-                            new go.Binding("visible", "role", r => r !== "assistant")
+                            new go.Binding("text", "dispName")
                         ),
                         $("TreeExpanderButton", {
                             margin: new go.Margin(0, 0, 3, 8),
@@ -361,12 +375,9 @@
                     ),
 
                     $(go.TextBlock, { font: "10px sans-serif", stroke: "#555", margin: new go.Margin(0, 0, 6, 0) },
-                        new go.Binding("text", "", d => `${d.aggTotal}名 (兼務除く:${d.aggUniqueCount}名) \n 幹:${d.aggTotalKanbu}(${d.aggUniqueKanbu}) 曹:${d.aggTotalIppan}(${d.aggUniqueIppan}) 事:${d.aggTotalJimu}(${d.aggUniqueJimu})`),
-                        new go.Binding("visible", "role", r => r !== "assistant")
+                        new go.Binding("text", "", d => `${d.aggTotal}名 (兼務除く:${d.aggUniqueCount}名) \n 幹:${d.aggTotalKanbu}(${d.aggUniqueKanbu}) 曹:${d.aggTotalIppan}(${d.aggUniqueIppan}) 事:${d.aggTotalJimu}(${d.aggUniqueJimu})`)
                     ),
-                    $(go.TextBlock, { font: "10px monospace", stroke: "#bbb", margin: new go.Margin(0, 0, 2, 0) }, "--------------------",
-                        new go.Binding("visible", "role", r => r !== "assistant")
-                    ),
+                    $(go.TextBlock, { font: "10px monospace", stroke: "#bbb", margin: new go.Margin(0, 0, 2, 0) }, "--------------------"),
                     $(go.TextBlock, { font: "11px sans-serif", stroke: "#333", margin: new go.Margin(0, 0, 0, 0) },
                         new go.Binding("text", "membersSummary")
                     )
@@ -383,14 +394,6 @@
             );
         }
 
-        function normalizeString(str) {
-            if (!str) return "";
-            return str
-                .toLowerCase()
-                .replace(/[Ａ-Ｚａ-ｚ０-９]/g, s => String.fromCharCode(s.charCodeAt(0) - 0xFEE0))
-                .normalize('NFKC');
-        }
-
         function searchNode() {
             const rawKeyword = document.getElementById('searchInput').value.trim();
             const keyword = normalizeString(rawKeyword);
@@ -398,6 +401,8 @@
                 clearSearch();
                 return;
             }
+
+            if (!myDiagram) return;
 
             myDiagram.startTransaction("search");
             myDiagram.nodes.each(n => n.isHighlighted = false);
@@ -408,7 +413,7 @@
                 const data = node.data;
                 let match = false;
 
-                if (data.org && normalizeString(data.org).includes(keyword)) {
+                if (data.dispName && normalizeString(data.dispName).includes(keyword)) {
                     match = true;
                 }
 
@@ -439,6 +444,7 @@
 
         function clearSearch() {
             document.getElementById('searchInput').value = "";
+            if (!myDiagram) return;
             myDiagram.startTransaction("clear search");
             myDiagram.nodes.each(n => n.isHighlighted = false);
             myDiagram.commitTransaction("clear search");
@@ -493,6 +499,7 @@
 
             targetData.forEach(row => {
                 const orgName = row.部隊名 ? row.部隊名.trim() : "";
+                const dispName = (row.表示名 && row.表示名.trim() !== "") ? row.表示名.trim() : orgName;
                 const parentOrgName = row.親部隊名 ? row.親部隊名.trim() : "";
                 if (!orgName) return;
 
@@ -500,7 +507,8 @@
                 const isAssistant = rawRole.trim() === "assistant" || rawRole.trim() === "スタッフ" || rawRole.trim() === "補佐";
                 const assignedRole = isAssistant ? "assistant" : "normal";
 
-                const nodeKey = isAssistant ? `${orgName}_${row.番号}` : orgName;
+                // ★ ノードキーは素直に「部隊名」、親キーも素直に「親部隊名」を使用する
+                const nodeKey = orgName;
                 const parentKey = (parentOrgName === "なし" || !parentOrgName) ? "" : parentOrgName;
 
                 if (!orgMap[nodeKey]) {
@@ -508,7 +516,8 @@
                         key: nodeKey,
                         parent: parentKey,
                         org: orgName,
-                        role: assignedRole,
+                        dispName: dispName,
+                        role: assignedRole, // assistantとして認識されればレイアウト時に横に配置される
                         members: [],
                         childrenKeys: []
                     };
@@ -523,14 +532,16 @@
                 const note = row.備考 ? row.備考.trim() : "";
 
                 const kanbuList = ["将", "将補", "1佐", "2佐", "3佐", "1尉", "2尉", "3尉"];
-                const ippanList = ["准尉", "1曹", "2曹", "3曹", "士長", "1士", "2士", "3士"];
+                const ippanList = ["准尉", "曹長", "1曹", "2曹", "3曹", "士長", "1士", "2士", "3士"];
 
+                const normalizedRank = normalizeString(rank);
                 let category = "other";
-                if (kanbuList.some(k => rank.includes(k))) {
+                
+                if (kanbuList.some(k => normalizedRank.includes(k))) {
                     category = "kanbu";
-                } else if (rank.startsWith('事') || rank.startsWith('技')) {
+                } else if (normalizedRank.startsWith('事') || normalizedRank.startsWith('技')) {
                     category = "jimu";
-                } else if (ippanList.some(i => rank.includes(i))) {
+                } else if (ippanList.some(i => normalizedRank.includes(i))) {
                     category = "ippan";
                 }
 
@@ -711,7 +722,7 @@
         });
 
         function showSidebar(nodeData) {
-            document.getElementById('sidebar-org-title').innerText = nodeData.role === 'assistant' ? nodeData.members[0].title + ": " + nodeData.members[0].name + " の詳細" : nodeData.org + " の詳細";
+            document.getElementById('sidebar-org-title').innerText = nodeData.dispName + " の詳細";
             
             document.getElementById('sidebar-summary').innerHTML = 
                 `<div style="padding: 8px; background: #f1f3f5; border-radius: 4px; margin-bottom: 10px;">` +
@@ -723,7 +734,7 @@
                 `<span class="summary-label">男女別:</span><span class="summary-value">男性: ${nodeData.aggTotalMale}(実:${nodeData.aggUniqueMale}) / 女性: ${nodeData.aggTotalFemale}(実:${nodeData.aggUniqueFemale})</span>` +
                 `</div></div>` +
                 `<div style="padding: 8px; background: #f1f3f5; border-radius: 4px; margin-bottom: 10px;">` +
-                `<b>【${nodeData.org} 単体】</b>` +
+                `<b>【${nodeData.dispName} 単体】</b>` +
                 `<div class="summary-grid">` +
                 `<span class="summary-label">総人数:</span><span class="summary-value">${nodeData.total}名 / 実人数: ${nodeData.uniqueMembersMap.size}名</span>` +
                 `<span class="summary-label">階級区分:</span><span class="summary-value">幹部 ${nodeData.kanbu}(実:${nodeData.uniqueKanbu}) / 准曹士 ${nodeData.ippan}(実:${nodeData.uniqueIppan}) / 事務官等 ${nodeData.jimu}(実:${nodeData.uniqueJimu})</span>` +
