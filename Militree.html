@@ -3,8 +3,8 @@
 <head>
     <meta charset="UTF-8">
     <title>Militree (部隊組織図)</title>
-    <script src="./libraly/go.js"></script>
-    <script src="./libraly/papaparse.min.js"></script>
+    <script src="./library/go.js"></script>
+    <script src="./library/papaparse.min.js"></script>
     <style>
         body { font-family: sans-serif; margin: 0; display: flex; height: 100vh; overflow: hidden; background: #fdfdfd; }
         #main-container { flex-grow: 1; display: flex; flex-direction: column; height: 100%; }
@@ -174,7 +174,7 @@
             cb.addEventListener('change', updateAllNodesSummary);
         });
 
-// ---------------------------------------------------------
+        // ---------------------------------------------------------
         // サイドツリー（アシスタント配置用）の高度なレイアウト計算
         // ---------------------------------------------------------
         class SideTreeLayout extends go.TreeLayout {
@@ -467,8 +467,10 @@
         function getSubtreeOrgs(targetOrg, data) {
             let childrenMap = new Map();
             data.forEach(row => {
-                let org = row.部隊名 ? row.部隊名.trim() : "";
-                let parent = row.親部隊名 ? row.親部隊名.trim() : "";
+                // ★ 旧: row.部隊名 -> 新: row.部隊コード に修正
+                let org = row.部隊コード ? row.部隊コード.trim() : "";
+                // ★ 旧: row.親部隊名 -> 新: row.上級部隊コード に修正
+                let parent = row.上級部隊コード ? row.上級部隊コード.trim() : "";
                 if (!org) return;
                 if (!childrenMap.has(parent)) childrenMap.set(parent, new Set());
                 childrenMap.get(parent).add(org);
@@ -498,12 +500,15 @@
             if (rootOrg) {
                 let validOrgs = getSubtreeOrgs(rootOrg, data);
                 targetData = data.filter(row => {
-                    let org = row.部隊名 ? row.部隊名.trim() : "";
+                    // ★ 旧: row.部隊名 -> 新: row.部隊コード に修正
+                    let org = row.部隊コード ? row.部隊コード.trim() : "";
                     return validOrgs.has(org);
                 }).map(row => {
-                    let org = row.部隊名 ? row.部隊名.trim() : "";
+                    // ★ 旧: row.部隊名 -> 新: row.部隊コード に修正
+                    let org = row.部隊コード ? row.部隊コード.trim() : "";
                     if (org === rootOrg) {
-                        return { ...row, 親部隊名: "" }; 
+                        // ★ 上級部隊との縁を切るため、正しくは「上級部隊コード」を空にする
+                        return { ...row, 上級部隊コード: "" }; 
                     }
                     return row;
                 });
@@ -512,9 +517,9 @@
             const orgMap = {};
 
             targetData.forEach(row => {
-                const orgName = row.部隊名 ? row.部隊名.trim() : "";
-                const dispName = (row.表示名 && row.表示名.trim() !== "") ? row.表示名.trim() : orgName;
-                const parentOrgName = row.親部隊名 ? row.親部隊名.trim() : "";
+                    const orgName = row.部隊コード ? row.部隊コード.trim() : "";
+                    const dispName = (row.部隊名 && row.部隊名.trim() !== "") ? row.部隊名.trim() : orgName;
+                    const parentOrgName = row.上級部隊コード ? row.上級部隊コード.trim() : "";
                 if (!orgName) return;
 
                 const rawRole = row.配置区分 || row.role || "";
