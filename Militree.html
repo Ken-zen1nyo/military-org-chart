@@ -63,7 +63,6 @@
                 <input type="file" id="csvFile" accept=".csv" />
                 <button class="btn-action" onclick="exportToSVG()">SVG保存</button>
                 <button class="btn-action" onclick="expandAllNodes()">全展開</button>
-                <button class="btn-reset" onclick="collapseAllNodes()">全折りたたみ</button>
                 <button class="btn-reset" onclick="resetRootView()">全体表示に戻す</button>
                 <span id="current-focus-label" style="font-size: 12px; color: #d9534f; font-weight: bold;"></span>
             </div>
@@ -129,21 +128,57 @@
             URL.revokeObjectURL(url);
         }
 
-function expandAllNodes() {
+        function expandAllNodes() {
             if (!myDiagram) return;
             myDiagram.startTransaction("expand all");
-            // ルート（トップ）ノードを起点に、すべての子孫を展開する
-            myDiagram.findTreeRoots().each(r => r.expandTree()); 
+            // すべてのノードの展開フラグを true にする
+            myDiagram.nodes.each(n => {
+                if (n instanceof go.Node) {
+                    n.isTreeExpanded = true;
+                }
+            });
             myDiagram.commitTransaction("expand all");
         }
 
-        function collapseAllNodes() {
+        function expandRootAndChildren() {
             if (!myDiagram) return;
-            myDiagram.startTransaction("collapse all");
-            // ルートノードを起点に、レベル1（直下）までを残して他をすべて折りたたむ
-            myDiagram.findTreeRoots().each(r => r.collapseTree(1)); 
-            myDiagram.commitTransaction("collapse all");
+            myDiagram.startTransaction("expand root");
+            
+            let rootNode = null;
+
+            // 1. すべてのノードをいったん閉じる
+            myDiagram.nodes.each(n => {
+                if (n instanceof go.Node) {
+                    n.isTreeExpanded = false;
+                }
+            });
+            
+            // 2. 親がいないルートノードを開き、さらにその「直下の隷下部隊」も開く
+            myDiagram.nodes.each(n => {
+                if (n instanceof go.Node) {
+                    let parentKey = n.data.parent;
+                    if (!parentKey || parentKey === "" || parentKey === "なし") {
+                        n.isTreeExpanded = true;
+                        rootNode = n; // ルートノードを記憶しておく
+                        
+                        let childrenIt = n.findTreeChildrenNodes();
+                        while (childrenIt.next()) {
+                            childrenIt.value.isTreeExpanded = true;
+                        }
+                    }
+                }
+            });
+            
+            myDiagram.commitTransaction("expand root");
+
+            // 3. 画面の描画・レイアウトが確定した後に、トップノードを画面の中心にフォーカスする
+            if (rootNode) {
+                setTimeout(() => {
+                    myDiagram.centerRect(rootNode.actualBounds);
+                }, 50);
+            }
         }
+
         function generateSummaryText(members) {
             if (!members) return "";
             const showTitle = document.getElementById('cb-title').checked;
@@ -394,7 +429,22 @@ function expandAllNodes() {
                         ),
                         $("TreeExpanderButton", {
                             margin: new go.Margin(0, 0, 3, 8),
-                            alignment: go.Spot.Right
+                            alignment: go.Spot.Right,
+                            click: function(e, button) {
+                                let node = button.part;
+                                if (node.isTreeExpanded) {
+                                    // 開いている状態で押されたら閉じる
+                                    node.collapseTree();
+                                } else {
+                                    // 閉じている状態で押されたら、自分を開き...
+                                    node.expandTree();
+                                    // その直下の子供たちの下（孫以降）はすべて閉じた状態にする
+                                    node.findTreeChildrenNodes().each(function(child) {
+                                        child.collapseTree();
+                                    });
+                                }
+                                e.handled = true;
+                            }
                         })
                     ),
 
@@ -732,13 +782,10 @@ function expandAllNodes() {
                 return { ...item, membersSummary: generateSummaryText(item.members) };
             });
 
+            // モデルにデータをセット
             myDiagram.model = new go.TreeModel(treeData);
 
-            // 読み込み直後の初期表示を「トップ直下のみ表示（それ以外は折りたたみ）」にする
-            myDiagram.startTransaction("init collapse");
-            myDiagram.nodes.each(n => { n.isTreeExpanded = false; });
-            myDiagram.findTreeRoots().each(r => { r.isTreeExpanded = true; });
-            myDiagram.commitTransaction("init collapse");
+            expandRootAndChildren();
         }
 
         function resetRootView() {
@@ -747,6 +794,8 @@ function expandAllNodes() {
             clearSearch();
             if (allCsvData) {
                 parseAndRender(allCsvData, null);
+                
+                expandRootAndChildren();
             }
         }
 
