@@ -62,6 +62,8 @@
             <div class="control-row">
                 <input type="file" id="csvFile" accept=".csv" />
                 <button class="btn-action" onclick="exportToSVG()">SVG保存</button>
+                <button class="btn-action" onclick="expandAllNodes()">全展開</button>
+                <button class="btn-reset" onclick="collapseAllNodes()">全折りたたみ</button>
                 <button class="btn-reset" onclick="resetRootView()">全体表示に戻す</button>
                 <span id="current-focus-label" style="font-size: 12px; color: #d9534f; font-weight: bold;"></span>
             </div>
@@ -91,7 +93,7 @@
         </div>
         <div id="sidebar-content">
             <div id="sidebar-summary" style="margin-bottom: 15px; font-size: 13px; line-height: 1.5; background: #f8f9fa; padding: 10px; border-radius: 4px;"></div>
-            <h4 style="margin: 0 0 5px 0; font-size: 14px;">所属メンバー一覧（この部隊のみ）</h4>
+            <h4 style="margin: 0 0 5px 0; font-size: 14px;">所属メンバー一覧</h4>
             <table class="member-table">
                 <thead>
                     <tr><th>ID</th><th>役職</th><th>階級</th><th>氏名</th><th>所属区分</th><th>備考</th></tr>
@@ -127,6 +129,21 @@
             URL.revokeObjectURL(url);
         }
 
+function expandAllNodes() {
+            if (!myDiagram) return;
+            myDiagram.startTransaction("expand all");
+            // ルート（トップ）ノードを起点に、すべての子孫を展開する
+            myDiagram.findTreeRoots().each(r => r.expandTree()); 
+            myDiagram.commitTransaction("expand all");
+        }
+
+        function collapseAllNodes() {
+            if (!myDiagram) return;
+            myDiagram.startTransaction("collapse all");
+            // ルートノードを起点に、レベル1（直下）までを残して他をすべて折りたたむ
+            myDiagram.findTreeRoots().each(r => r.collapseTree(1)); 
+            myDiagram.commitTransaction("collapse all");
+        }
         function generateSummaryText(members) {
             if (!members) return "";
             const showTitle = document.getElementById('cb-title').checked;
@@ -141,8 +158,13 @@
                 if (showTitle && m.title) parts.push(m.title);
                 if (showBranch && m.branch) parts.push("[" + m.branch + "]");
                 if (showRank && m.rank) parts.push(m.rank);
-                if (showName && m.name) parts.push(m.name);
-                if (showGender && m.gender) parts.push("（" + m.gender + "）");
+                
+                if (m.kubunType === "欠員") {
+                    if (showName) parts.push("（欠員）");
+                } else {
+                    if (showName && m.name) parts.push(m.name);
+                    if (showGender && m.gender && m.gender !== "-") parts.push("（" + m.gender + "）");
+                }
 
                 let text = parts.join(" ");
                 
@@ -190,7 +212,6 @@
                 let rightH = 0;
                 let index = 0;
                 
-                // アシスタントの実際の高さを左右それぞれ正確に合算する
                 let it = v.node.findTreeChildrenNodes();
                 while(it.next()) {
                     let child = it.value;
@@ -203,18 +224,14 @@
                 }
                 
                 let maxAsstHeight = Math.max(leftH, rightH);
-                // アシスタント群を完全にやり過ごすための必須ドロップ距離
                 let requiredDrop = 15 + maxAsstHeight + 15; 
 
                 if (maxAsstHeight > 0) {
-                    // 下位部隊は、必須ドロップ距離よりもさらに「30px」下に配置することで、
-                    // 線が絶対に上に逆戻り（ジグザグ）しないようにする
                     v.layerSpacing = requiredDrop + 30; 
                 } else {
                     v.layerSpacing = 40;
                 }
                 
-                // リンク描画用に距離を保存
                 v.node.dropDistance = requiredDrop;
             }
 
@@ -277,7 +294,6 @@
                     }
                     
                     if (assistants.length > 0 && regularChildrenLinks.length > 0) {
-                        // assignTreeVertexValues で計算した正確な距離を使用
                         let dropDist = node.dropDistance || 50; 
                         regularChildrenLinks.forEach(l => {
                             l.fromEndSegmentLength = dropDist;
@@ -323,7 +339,7 @@
                 layout: $(SideTreeLayout, {
                     angle: 90,
                     nodeSpacing: 40,
-                    layerStyle: go.TreeLayout.LayerUniform, // ★階層の高さを水平に揃える
+                    layerStyle: go.TreeLayout.LayerUniform, 
                     alignment: go.TreeLayout.AlignmentCenterChildren
                 }),
                 "undoManager.isEnabled": true
@@ -341,7 +357,7 @@
                                     let nodeData = obj.part.adornedPart.data;
                                     if (nodeData && nodeData.org) {
                                         currentRootOrg = nodeData.org;
-                                        document.getElementById('current-focus-label').innerText = `[フォーカス中: ${currentRootOrg}]`;
+                                        document.getElementById('current-focus-label').innerText = `[フォーカス中: ${nodeData.dispName}]`;
                                         parseAndRender(allCsvData, currentRootOrg);
                                     }
                                 }
@@ -374,7 +390,6 @@
                         { stretch: go.GraphObject.Horizontal, alignment: go.Spot.Left },
                         $(go.TextBlock, { font: "bold 13px sans-serif", stroke: "#222", margin: new go.Margin(0, 0, 3, 0) },
                             new go.Binding("text", "dispName"),
-                            // ★ 追加: アシスタントかつ1名の場合は部隊名（表示名）を非表示にする
                             new go.Binding("visible", "", d => !(d.role === "assistant" && d.members && d.members.length === 1))
                         ),
                         $("TreeExpanderButton", {
@@ -384,12 +399,10 @@
                     ),
 
                     $(go.TextBlock, { font: "10px sans-serif", stroke: "#555", margin: new go.Margin(0, 0, 6, 0) },
-                        new go.Binding("text", "", d => `${d.aggTotal}名 (兼務除く:${d.aggUniqueCount}名) \n 幹:${d.aggTotalKanbu}(${d.aggUniqueKanbu}) 曹:${d.aggTotalIppan}(${d.aggUniqueIppan}) 事:${d.aggTotalJimu}(${d.aggUniqueJimu})`),
-                        // ★ 追加: アシスタントの場合は集計テキストを非表示にする
+                        new go.Binding("text", "", d => `規模:${d.aggTotal}名 (実員:${d.aggUniqueCount}名 / 欠員:${d.aggTotalVacancy}名) \n 幹:${d.aggTotalKanbu} 曹:${d.aggTotalIppan} 事:${d.aggTotalJimu}`),
                         new go.Binding("visible", "role", r => r !== "assistant")
                     ),
                     $(go.TextBlock, { font: "10px monospace", stroke: "#bbb", margin: new go.Margin(0, 0, 2, 0) }, "--------------------",
-                        // ★ 追加: アシスタントの場合は区切り線を非表示にする
                         new go.Binding("visible", "role", r => r !== "assistant")
                     ),
                     $(go.TextBlock, { font: "11px sans-serif", stroke: "#333", margin: new go.Margin(0, 0, 0, 0) },
@@ -467,9 +480,7 @@
         function getSubtreeOrgs(targetOrg, data) {
             let childrenMap = new Map();
             data.forEach(row => {
-                // ★ 旧: row.部隊名 -> 新: row.部隊コード に修正
                 let org = row.部隊コード ? row.部隊コード.trim() : "";
-                // ★ 旧: row.親部隊名 -> 新: row.上級部隊コード に修正
                 let parent = row.上級部隊コード ? row.上級部隊コード.trim() : "";
                 if (!org) return;
                 if (!childrenMap.has(parent)) childrenMap.set(parent, new Set());
@@ -500,14 +511,11 @@
             if (rootOrg) {
                 let validOrgs = getSubtreeOrgs(rootOrg, data);
                 targetData = data.filter(row => {
-                    // ★ 旧: row.部隊名 -> 新: row.部隊コード に修正
                     let org = row.部隊コード ? row.部隊コード.trim() : "";
                     return validOrgs.has(org);
                 }).map(row => {
-                    // ★ 旧: row.部隊名 -> 新: row.部隊コード に修正
                     let org = row.部隊コード ? row.部隊コード.trim() : "";
                     if (org === rootOrg) {
-                        // ★ 上級部隊との縁を切るため、正しくは「上級部隊コード」を空にする
                         return { ...row, 上級部隊コード: "" }; 
                     }
                     return row;
@@ -517,9 +525,10 @@
             const orgMap = {};
 
             targetData.forEach(row => {
-                    const orgName = row.部隊コード ? row.部隊コード.trim() : "";
-                    const dispName = (row.部隊名 && row.部隊名.trim() !== "") ? row.部隊名.trim() : orgName;
-                    const parentOrgName = row.上級部隊コード ? row.上級部隊コード.trim() : "";
+                const orgName = row.部隊コード ? row.部隊コード.trim() : "";
+                const dispName = (row.部隊名 && row.部隊名.trim() !== "") ? row.部隊名.trim() : orgName;
+                const parentOrgName = row.上級部隊コード ? row.上級部隊コード.trim() : "";
+                
                 if (!orgName) return;
 
                 const rawRole = row.配置区分 || row.role || "";
@@ -557,23 +566,26 @@
                 
                 if (kanbuList.some(k => normalizedRank.includes(k))) {
                     category = "kanbu";
-                } else if (normalizedRank.startsWith('行') || normalizedRank.startsWith('研')) {
+                } else if (normalizedRank.startsWith('行') || normalizedRank.startsWith('研') || normalizedRank.includes('事務官')) {
                     category = "jimu";
                 } else if (ippanList.some(i => normalizedRank.includes(i))) {
                     category = "ippan";
                 }
 
-                orgMap[nodeKey].members.push({
-                    id: memberId,
-                    title: row.役職,
-                    rank: rank,
-                    name: name,
-                    gender: gender,
-                    branch: branch,
-                    kubunType: kubunType,
-                    note: note,
-                    category: category
-                });
+                // 氏名、役職、階級のいずれかが入力されている場合のみ登録
+                if (name !== "" || row.役職 || rank !== "") {
+                    orgMap[nodeKey].members.push({
+                        id: memberId,
+                        title: row.役職,
+                        rank: rank,
+                        name: name,
+                        gender: gender,
+                        branch: branch,
+                        kubunType: kubunType,
+                        note: note,
+                        category: category
+                    });
+                }
             });
 
             let rootKeys = [];
@@ -592,13 +604,18 @@
                 
                 let totalMale = 0, totalFemale = 0;
                 let totalKanbu = 0, totalIppan = 0, totalJimu = 0, totalOtherClass = 0;
-                let totalBranch = { 陸: 0, 海: 0, 空: 0, 統: 0, その他: 0 };
+                let totalBranch = { 陸: 0, 海: 0, 空: 0, 統: 0, 内: 0, その他: 0 };
+                let totalVacancy = 0; 
 
                 let uniqueMale = 0, uniqueFemale = 0;
                 let uniqueKanbu = 0, uniqueIppan = 0, uniqueJimu = 0, uniqueOtherClass = 0;
-                let uniqueBranch = { 陸: 0, 海: 0, 空: 0, 統: 0, その他: 0 };
+                let uniqueBranch = { 陸: 0, 海: 0, 空: 0, 統: 0, 内: 0, その他: 0 };
 
                 node.members.forEach((m, index) => {
+                    if (m.kubunType === "欠員") {
+                        totalVacancy++;
+                    }
+
                     if (m.gender === "男") totalMale++;
                     else if (m.gender === "女") totalFemale++;
 
@@ -610,7 +627,7 @@
                     else if (m.category === "jimu") totalJimu++;
                     else totalOtherClass++;
 
-                    if (m.kubunType !== '兼務') {
+                    if (m.kubunType !== '兼務' && m.kubunType !== '欠員') {
                         const uniqueKey = m.id ? m.id : `${m.name}_${index}`;
                         if (!singleUniqueMap.has(uniqueKey)) {
                             singleUniqueMap.set(uniqueKey, m);
@@ -630,6 +647,7 @@
                 });
 
                 node.total = node.members.length;
+                node.vacancy = totalVacancy; 
                 node.uniqueMembersMap = singleUniqueMap; 
                 
                 node.male = totalMale; node.uniqueMale = uniqueMale;
@@ -650,8 +668,10 @@
                 });
 
                 let aggTotalRows = node.total;
+                let aggTotalVacancy = totalVacancy; 
                 node.childrenKeys.forEach(childKey => {
                     aggTotalRows += orgMap[childKey].aggTotal;
+                    aggTotalVacancy += orgMap[childKey].aggTotalVacancy; 
                 });
 
                 let aggTotalMale = totalMale, aggTotalFemale = totalFemale;
@@ -669,12 +689,13 @@
                     aggTotalBranch.海 += c.aggTotalBranch.海;
                     aggTotalBranch.空 += c.aggTotalBranch.空;
                     aggTotalBranch.統 += c.aggTotalBranch.統;
+                    aggTotalBranch.内 += c.aggTotalBranch.内;
                     aggTotalBranch.その他 += c.aggTotalBranch.その他;
                 });
 
                 let aggUniqueMale = 0, aggUniqueFemale = 0;
                 let aggUniqueKanbu = 0, aggUniqueIppan = 0, aggUniqueJimu = 0;
-                let aggUniqueBranch = { 陸: 0, 海: 0, 空: 0, 統: 0, その他: 0 };
+                let aggUniqueBranch = { 陸: 0, 海: 0, 空: 0, 統: 0, 内: 0, その他: 0 };
 
                 allUniqueMap.forEach(m => {
                     if (m.gender === "男") aggUniqueMale++;
@@ -689,6 +710,7 @@
                 });
 
                 node.aggTotal = aggTotalRows;
+                node.aggTotalVacancy = aggTotalVacancy; 
                 node.aggUniqueCount = allUniqueMap.size;
                 
                 node.aggTotalMale = aggTotalMale; node.aggUniqueMale = aggUniqueMale;
@@ -711,6 +733,12 @@
             });
 
             myDiagram.model = new go.TreeModel(treeData);
+
+            // 読み込み直後の初期表示を「トップ直下のみ表示（それ以外は折りたたみ）」にする
+            myDiagram.startTransaction("init collapse");
+            myDiagram.nodes.each(n => { n.isTreeExpanded = false; });
+            myDiagram.findTreeRoots().each(r => { r.isTreeExpanded = true; });
+            myDiagram.commitTransaction("init collapse");
         }
 
         function resetRootView() {
@@ -744,19 +772,19 @@
             
             document.getElementById('sidebar-summary').innerHTML = 
                 `<div style="padding: 8px; background: #f1f3f5; border-radius: 4px; margin-bottom: 10px;">` +
-                `<b>【部隊集計（配下含む・兼務除外反映）】</b>` +
+                `<b>【部隊集計（配下含む・兼務/欠員除外反映）】</b>` +
                 `<div class="summary-grid">` +
-                `<span class="summary-label">総人数:</span><span class="summary-value">${nodeData.aggTotal}名 / 実人数: ${nodeData.aggUniqueCount}名</span>` +
+                `<span class="summary-label">部隊規模:</span><span class="summary-value">${nodeData.aggTotal}名 / 実人員: ${nodeData.aggUniqueCount}名 <span style="color:#d9534f; font-weight:bold;">(欠員: ${nodeData.aggTotalVacancy}名)</span></span>` +
                 `<span class="summary-label">階級区分:</span><span class="summary-value">幹部 ${nodeData.aggTotalKanbu}(実:${nodeData.aggUniqueKanbu}) / 准曹士 ${nodeData.aggTotalIppan}(実:${nodeData.aggUniqueIppan}) / 事務官等 ${nodeData.aggTotalJimu}(実:${nodeData.aggUniqueJimu})</span>` +
-                `<span class="summary-label">軍種別:</span><span class="summary-value">陸: ${nodeData.aggTotalBranch.陸}(実:${nodeData.aggUniqueBranch.陸}) / 海: ${nodeData.aggTotalBranch.海}(実:${nodeData.aggUniqueBranch.海}) / 空: ${nodeData.aggTotalBranch.空}(実:${nodeData.aggUniqueBranch.空})</span>` +
+                `<span class="summary-label">軍種別:</span><span class="summary-value">陸: ${nodeData.aggTotalBranch.陸} / 海: ${nodeData.aggTotalBranch.海} / 空: ${nodeData.aggTotalBranch.空} / 統: ${nodeData.aggTotalBranch.統} / 内: ${nodeData.aggTotalBranch.内}</span>` +
                 `<span class="summary-label">男女別:</span><span class="summary-value">男性: ${nodeData.aggTotalMale}(実:${nodeData.aggUniqueMale}) / 女性: ${nodeData.aggTotalFemale}(実:${nodeData.aggUniqueFemale})</span>` +
                 `</div></div>` +
                 `<div style="padding: 8px; background: #f1f3f5; border-radius: 4px; margin-bottom: 10px;">` +
                 `<b>【${nodeData.dispName} 単体】</b>` +
                 `<div class="summary-grid">` +
-                `<span class="summary-label">総人数:</span><span class="summary-value">${nodeData.total}名 / 実人数: ${nodeData.uniqueMembersMap.size}名</span>` +
+                `<span class="summary-label">部隊規模:</span><span class="summary-value">${nodeData.total}名 / 実人員: ${nodeData.uniqueMembersMap.size}名 <span style="color:#d9534f; font-weight:bold;">(欠員: ${nodeData.vacancy}名)</span></span>` +
                 `<span class="summary-label">階級区分:</span><span class="summary-value">幹部 ${nodeData.kanbu}(実:${nodeData.uniqueKanbu}) / 准曹士 ${nodeData.ippan}(実:${nodeData.uniqueIppan}) / 事務官等 ${nodeData.jimu}(実:${nodeData.uniqueJimu})</span>` +
-                `<span class="summary-label">軍種別:</span><span class="summary-value">陸: ${nodeData.branchCount.陸}(実:${nodeData.uniqueBranchCount.陸}) / 海: ${nodeData.branchCount.海}(実:${nodeData.uniqueBranchCount.海}) / 空: ${nodeData.branchCount.空}(実:${nodeData.uniqueBranchCount.空})</span>` +
+                `<span class="summary-label">軍種別:</span><span class="summary-value">陸: ${nodeData.branchCount.陸} / 海: ${nodeData.branchCount.海} / 空: ${nodeData.branchCount.空} / 統: ${nodeData.branchCount.統} / 内: ${nodeData.branchCount.内}</span>` +
                 `<span class="summary-label">男女別:</span><span class="summary-value">男性: ${nodeData.male}(実:${nodeData.uniqueMale}) / 女性: ${nodeData.female}(実:${nodeData.uniqueFemale})</span>` +
                 `</div></div>`;
 
@@ -765,7 +793,7 @@
             if (nodeData.members) {
                 nodeData.members.forEach(m => {
                     const tr = document.createElement('tr');
-                    let kubunColor = (m.kubunType === '兼務') ? 'color: red; font-weight: bold;' : '';
+                    let kubunColor = (m.kubunType === '兼務' || m.kubunType === '欠員') ? 'color: red; font-weight: bold;' : '';
                     tr.innerHTML = `<td>${m.id}</td><td>${m.title}</td><td>${m.rank}</td><td>${m.name}</td><td><span style="${kubunColor}">${m.kubunType}</span></td><td>${m.note}</td>`;
                     tbody.appendChild(tr);
                 });
