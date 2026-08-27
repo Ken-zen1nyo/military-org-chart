@@ -68,7 +68,7 @@
     <div id="main-container">
         <div id="controls">
             <div class="control-row">
-                <input type="file" id="csvFile" accept=".csv" />
+                <input type="file" id="csvFile" accept=".csv" multiple />
                 <button class="btn-action" onclick="exportToSVG()">SVG保存</button>
                 <button class="btn-action" onclick="expandAllNodes()">全展開</button>
                 <button class="btn-reset" onclick="resetRootView()">全体表示に戻す</button>
@@ -342,7 +342,7 @@
                         node.clickTimer = setTimeout(() => {
                             showSidebar(node.data);
                             node.clickTimer = null;
-                        }, 250); // 250ミリ秒待機して、ダブルクリックが来なければ右サイドバーを開く
+                        }, 500); // 500ミリ秒待機して、ダブルクリックが来なければ右サイドバーを開く
                     },
                     doubleClick: (e, node) => {
                         if (node.clickTimer) {
@@ -669,17 +669,33 @@
         }
 
         document.getElementById('csvFile').addEventListener('change', function(e) {
-            const file = e.target.files[0];
-            if (!file) return;
-            Papa.parse(file, {
-                header: true, skipEmptyLines: true,
-                complete: function(results) {
-                    allCsvData = results.data; currentRootOrg = null;
-                    document.getElementById('current-focus-label').innerText = "";
-                    clearSearch();
-                    parseAndRender(allCsvData, null);
-                }
-            });
+            const files = e.target.files;
+            if (!files || files.length === 0) return;
+
+            let allMergedData = [];
+            let filesProcessed = 0;
+
+            // 選択されたすべてのファイルをループ処理で読み込む
+            for (let i = 0; i < files.length; i++) {
+                Papa.parse(files[i], {
+                    header: true,
+                    skipEmptyLines: true,
+                    complete: function(results) {
+                        // 読み込んだデータを配列に結合していく
+                        allMergedData = allMergedData.concat(results.data);
+                        filesProcessed++;
+
+                        // すべてのファイルの読み込みが終わったら描画処理へ進む
+                        if (filesProcessed === files.length) {
+                            allCsvData = allMergedData;
+                            currentRootOrg = null;
+                            document.getElementById('current-focus-label').innerText = "";
+                            clearSearch();
+                            parseAndRender(allCsvData, null);
+                        }
+                    }
+                });
+            }
         });
 
         // ---------------------------------------------------------
