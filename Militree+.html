@@ -83,6 +83,7 @@
                 <label><input type="checkbox" class="disp-cb" id="cb-gender"> 性別</label>
                 <label><input type="checkbox" class="disp-cb" id="cb-abnormality" checked> 出欠</label>
                 <label><input type="checkbox" class="disp-cb" id="cb-note"> 備考</label>
+                <label><input type="checkbox" class="disp-cb" id="cb-agg" checked> 集計</label>
 
                 <div style="margin-left: auto; display: flex; gap: 5px; align-items: center;">
                     <input type="text" id="searchInput" class="search-input" placeholder="氏名、役職、部隊名で検索..." onkeydown="if(event.key==='Enter') searchNode();" />
@@ -114,7 +115,7 @@
             <h4 style="margin: 0 0 5px 0; font-size: 14px;">所属メンバー一覧</h4>
             <table class="member-table">
                 <thead>
-                    <tr><th>役職</th><th>階級</th><th>氏名</th><th>区分</th><th>異常の有無</th><th>理由等</th></tr>
+                    <tr><th>役職</th><th>階級</th><th>氏名</th><th>区分</th><th>不在状況</th><th>理由等</th></tr>
                 </thead>
                 <tbody id="sidebar-member-tbody"></tbody>
             </table>
@@ -217,12 +218,18 @@
         function updateAllNodesSummary() {
             if (!myDiagram || !myDiagram.model) return;
             myDiagram.startTransaction("update display");
+            
+            // ★ 集計チェックボックスの状態を取得
+            const showAgg = document.getElementById('cb-agg').checked;
+            
             const nodeDataArray = myDiagram.model.nodeDataArray;
             nodeDataArray.forEach(data => {
                 if (data.members) {
                     const newText = generateSummaryText(data.members);
                     myDiagram.model.setDataProperty(data, "membersSummary", newText);
                 }
+                // ★ データに「集計の表示/非表示フラグ」をセット
+                myDiagram.model.setDataProperty(data, "showAgg", showAgg);
             });
             myDiagram.commitTransaction("update display");
         }
@@ -342,7 +349,7 @@
                         node.clickTimer = setTimeout(() => {
                             showSidebar(node.data);
                             node.clickTimer = null;
-                        }, 500); // 500ミリ秒待機して、ダブルクリックが来なければ右サイドバーを開く
+                        }, 300); // 300ミリ秒待機して、ダブルクリックが来なければ右サイドバーを開く
                     },
                     doubleClick: (e, node) => {
                         if (node.clickTimer) {
@@ -353,7 +360,7 @@
                     },
                     contextMenu: $(go.Adornment, "Vertical",
                         $("ContextMenuButton",
-                            $(go.TextBlock, "出欠状況を表示 (現在員/事故)"),
+                            $(go.TextBlock, "出欠状況を表示 (総員/事故)"),
                             { click: (e, obj) => showLeftSidebar(obj.part.adornedPart.data) }
                         ),
                         $("ContextMenuButton",
@@ -406,10 +413,10 @@
                     ),
                     $(go.TextBlock, { font: "10px sans-serif", stroke: "#555", margin: new go.Margin(0, 0, 6, 0) },
                         new go.Binding("text", "", d => `規模:${d.aggTotal}名 (実員:${d.aggUniqueCount}名 / 事故:${d.aggTotalAccident}名) \n実員内訳： 幹${d.aggUniqueKanbu} / 曹${d.aggUniqueIppan} / 事${d.aggUniqueJimu}`),
-                        new go.Binding("visible", "role", r => r !== "assistant")
+                        new go.Binding("visible", "", d => (d.role !== "assistant") && (d.showAgg !== false))
                     ),
                     $(go.TextBlock, { font: "10px monospace", stroke: "#bbb", margin: new go.Margin(0, 0, 2, 0) }, "--------------------",
-                        new go.Binding("visible", "role", r => r !== "assistant")
+                        new go.Binding("visible", "", d => (d.role !== "assistant") && (d.showAgg !== false))
                     ),
                     $(go.TextBlock, { font: "11px sans-serif", stroke: "#333", margin: new go.Margin(0, 0, 0, 0) },
                         new go.Binding("text", "membersSummary")
@@ -526,7 +533,7 @@
                 const kubunType = row.所属区分 ? row.所属区分.trim() : "主務";
                 
                 // 【新規追加】出欠用カラム
-                const abnormality = row.異常の有無 ? row.異常の有無.trim() : "";
+                const abnormality = row.不在 ? row.不在.trim() : "";
                 const reason = row.理由等 ? row.理由等.trim() : "";
 
                 const normalizedRank = normalizeString(rank);
@@ -582,7 +589,7 @@
                             if (m.gender === "男") uniqueMale++; else if (m.gender === "女") uniqueFemale++;
                             if (uniqueBranch[m.branch] !== undefined) uniqueBranch[m.branch]++; else uniqueBranch.その他++;
                             if (m.category === "kanbu") uniqueKanbu++; else if (m.category === "ippan") uniqueIppan++; else if (m.category === "jimu") uniqueJimu++;
-                            // 実員の中で異常の有無がある人をカウント
+                            // 実員の中で不在者をカウント
                             if (m.abnormality !== "") totalAccident++;
                         }
                     }
@@ -720,19 +727,19 @@
             let html = `
                 <div style="background: #f8f9fa; padding: 15px; border-radius: 5px; font-size: 15px; line-height: 1.8; margin-bottom: 20px; border: 1px solid #e0e0e0;">
                     <div style="display: flex; justify-content: space-between; border-bottom: 1px solid #ddd; padding-bottom: 5px;">
-                        <span><b>現在員:</b></span><span style="font-size:16px;"><b>${currentCount} 名</b></span>
+                        <span><b>総　員:</b></span><span style="font-size:16px;"><b>${currentCount} 名</b></span>
                     </div>
                     <div style="display: flex; justify-content: space-between; border-bottom: 1px solid #ddd; padding: 5px 0; color: #d9534f;">
-                        <span><b>事故:</b></span><span style="font-size:16px;"><b>${accidentCount} 名</b></span>
+                        <span><b>事　故:</b></span><span style="font-size:16px;"><b>${accidentCount} 名</b></span>
                     </div>
                     <div style="display: flex; justify-content: space-between; padding-top: 5px; color: #004d40;">
-                        <span><b>差引現在員:</b></span><span style="font-size:16px;"><b>${netPresent} 名</b></span>
+                        <span><b>現在員:</b></span><span style="font-size:16px;"><b>${netPresent} 名</b></span>
                     </div>
                 </div>
             `;
 
             if (accidentCount > 0) {
-                html += `<h4 style="margin: 0 0 10px 0; font-size: 14px; border-left: 4px solid #3f51b5; padding-left: 8px;">事故内訳</h4>`;
+                html += `<h4 style="margin: 0 0 10px 0; font-size: 14px; border-left: 4px solid #3f51b5; padding-left: 8px;">事故の内訳</h4>`;
                 html += `<ul class="absent-list">`;
                 
                 // 所属部隊ごとにソートして見やすくする（オプション）
@@ -773,8 +780,16 @@
                 `<div class="summary-grid">` +
                 `<span class="summary-label">部隊規模:</span><span class="summary-value">${nodeData.aggTotal}名 / 実人員: ${nodeData.aggUniqueCount}名 <span style="color:#d9534f; font-weight:bold;">(欠員: ${nodeData.aggTotalVacancy}名)</span></span>` +
                 `<span class="summary-label">階級区分:</span><span class="summary-value">幹部 ${nodeData.aggTotalKanbu}(実:${nodeData.aggUniqueKanbu}) / 准曹士 ${nodeData.aggTotalIppan}(実:${nodeData.aggUniqueIppan}) / 事務官等 ${nodeData.aggTotalJimu}(実:${nodeData.aggUniqueJimu})</span>` +
-                `<span class="summary-label">軍種別:</span><span class="summary-value">陸:${nodeData.aggTotalBranch.陸}(実:${nodeData.aggUniqueBranch.陸}) / 海:${nodeData.aggTotalBranch.海}(実:${nodeData.aggUniqueBranch.海}) / 空:${nodeData.aggTotalBranch.空}(実:${nodeData.aggUniqueBranch.空})</span>` +
+                `<span class="summary-label">軍種別:</span><span class="summary-value">陸:${nodeData.aggTotalBranch.陸}(実:${nodeData.aggUniqueBranch.陸}) / 海:${nodeData.aggTotalBranch.海}(実:${nodeData.aggUniqueBranch.海}) / 空:${nodeData.aggTotalBranch.空}(実:${nodeData.aggUniqueBranch.空}) / 統:${nodeData.aggTotalBranch.統}(実:${nodeData.aggUniqueBranch.統}) / 内:${nodeData.aggTotalBranch.内}(実:${nodeData.aggUniqueBranch.内})</span>` +
                 `<span class="summary-label">男女別:</span><span class="summary-value">男性: ${nodeData.aggTotalMale}(実:${nodeData.aggUniqueMale}) / 女性: ${nodeData.aggTotalFemale}(実:${nodeData.aggUniqueFemale})</span>` +
+                `</div></div>` +
+                `<div style="padding: 8px; background: #f1f3f5; border-radius: 4px; margin-bottom: 10px;">` +
+                `<b>【${nodeData.dispName} 単体】</b>` +
+                `<div class="summary-grid">` +
+                `<span class="summary-label">部隊規模:</span><span class="summary-value">${nodeData.total}名 / 実人員: ${nodeData.uniqueMembersMap.size}名 <span style="color:#d9534f; font-weight:bold;">(欠員: ${nodeData.vacancy}名)</span></span>` +
+                `<span class="summary-label">階級区分:</span><span class="summary-value">幹部 ${nodeData.kanbu}(実:${nodeData.uniqueKanbu}) / 准曹士 ${nodeData.ippan}(実:${nodeData.uniqueIppan}) / 事務官等 ${nodeData.jimu}(実:${nodeData.uniqueJimu})</span>` +
+                `<span class="summary-label">軍種別:</span><span class="summary-value">陸:${nodeData.branchCount.陸}(実:${nodeData.uniqueBranchCount.陸}) / 海:${nodeData.branchCount.海}(実:${nodeData.uniqueBranchCount.海}) / 空:${nodeData.branchCount.空}(実:${nodeData.uniqueBranchCount.空}) / 統:${nodeData.branchCount.統}(実:${nodeData.uniqueBranchCount.統}) / 内:${nodeData.branchCount.内}(実:${nodeData.uniqueBranchCount.内})</span>` +
+                `<span class="summary-label">男女別:</span><span class="summary-value">男性: ${nodeData.male}(実:${nodeData.uniqueMale}) / 女性: ${nodeData.female}(実:${nodeData.uniqueFemale})</span>` +
                 `</div></div>`;
 
             const tbody = document.getElementById('sidebar-member-tbody');
